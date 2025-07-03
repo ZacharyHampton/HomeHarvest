@@ -199,6 +199,9 @@ class RealtorScraper(Scraper):
 
         advertisers = self.process_advertisers(result.get("advertisers"))
 
+        # Extract address data for enhanced fields
+        address_data = result.get("location", {}).get("address", {}) if result.get("location") else {}
+
         realty_property = Property(
             mls=mls,
             mls_id=(
@@ -214,6 +217,7 @@ class RealtorScraper(Scraper):
             list_price_min=result["list_price_min"],
             list_price_max=result["list_price_max"],
             list_date=(result["list_date"].split("T")[0] if result.get("list_date") else None),
+            pending_date=result.get("pending_date"),
             prc_sqft=result.get("price_per_sqft"),
             last_sold_date=result.get("last_sold_date"),
             new_construction=result["flags"].get("is_new_construction") is True,
@@ -232,8 +236,237 @@ class RealtorScraper(Scraper):
             advertisers=advertisers,
             tax=prop_details.get("tax"),
             tax_history=prop_details.get("tax_history"),
+            street_number=address_data.get("street_number"),
+            street_direction=address_data.get("street_direction"),
+            street_suffix=address_data.get("street_suffix"),
+            estimate_high=(est.get("estimateHigh") or est.get("estimate_high") if property_estimates_root and isinstance(property_estimates_root, list) and len(property_estimates_root) > 0 and isinstance(est := property_estimates_root[0], dict) else None),
+            estimate_low=(est.get("estimateLow") or est.get("estimate_low") if property_estimates_root and isinstance(property_estimates_root, list) and len(property_estimates_root) > 0 and isinstance(est := property_estimates_root[0], dict) else None),
+            estimate_source=(est.get("source", {}).get("name") if property_estimates_root and isinstance(property_estimates_root, list) and len(property_estimates_root) > 0 and isinstance(est := property_estimates_root[0], dict) and est.get("source") else None),
+            estimate_date=(est.get("date") if property_estimates_root and isinstance(property_estimates_root, list) and len(property_estimates_root) > 0 and isinstance(est := property_estimates_root[0], dict) else None),
+            apn=(result["tax_record"].get("apn") if result.get("tax_record") and isinstance(result["tax_record"], dict) else None),
+            public_record_id=(result["tax_record"].get("public_record_id") if result.get("tax_record") and isinstance(result["tax_record"], dict) else None),
+            tax_parcel_id=(result["tax_record"].get("tax_parcel_id") if result.get("tax_record") and isinstance(result["tax_record"], dict) else None),
+            tax_record_last_update=(result["tax_record"].get("last_update_date") if result.get("tax_record") and isinstance(result["tax_record"], dict) else None),
+            monthly_fees=self._format_fees(result.get("monthly_fees")),
+            one_time_fees=self._format_fees(result.get("one_time_fees")),
+            parking_details=self._format_parking_details(result.get("parking")),
+            pet_friendly=self._format_pet_policy(result.get("pet_policy")),
+            lease_terms=self._format_lease_terms(result.get("terms")),
+            unit_count=(len(result["units"]) if result.get("units") and isinstance(result["units"], list) else None),
+            available_units=self._get_available_units(result.get("units")),
+            rental_management_name=self._get_rental_management_name(result.get("advertisers")),
+            rental_management_href=self._get_rental_management_href(result.get("advertisers")),
+            property_tags=self._format_property_tags(result.get("tags")),
+            property_details=self._format_property_details(result.get("details")),
         )
+        
         return realty_property
+    
+    def _parse_enhanced_address(self, result: dict) -> dict:
+        """Parse enhanced address components from result."""
+        location = result.get("location", {})
+        address_data = location.get("address", {}) if isinstance(location, dict) else {}
+        
+        return {
+            "street_number": address_data.get("street_number"),
+            "street_direction": address_data.get("street_direction"),
+            "street_suffix": address_data.get("street_suffix"),
+        }
+
+    def _parse_enhanced_estimates(self, estimates_root) -> dict:
+        """Parse enhanced property estimates from estimates data."""
+        if not estimates_root or not isinstance(estimates_root, list) or len(estimates_root) == 0:
+            return {
+                "estimate_high": None,
+                "estimate_low": None,
+                "estimate_source": None,
+                "estimate_date": None,
+            }
+        
+        est = estimates_root[0]
+        if not isinstance(est, dict):
+            return {
+                "estimate_high": None,
+                "estimate_low": None,
+                "estimate_source": None,
+                "estimate_date": None,
+            }
+        
+        source_name = None
+        if source := est.get("source"):
+            if isinstance(source, dict):
+                source_name = source.get("name")
+        
+        return {
+            "estimate_high": est.get("estimateHigh") or est.get("estimate_high"),
+            "estimate_low": est.get("estimateLow") or est.get("estimate_low"),
+            "estimate_source": source_name,
+            "estimate_date": est.get("date"),
+        }
+
+    def _parse_tax_record(self, result: dict) -> dict:
+        """Parse tax record details from result."""
+        tax_record = result.get("tax_record")
+        if not tax_record or not isinstance(tax_record, dict):
+            return {
+                "apn": None,
+                "public_record_id": None,
+                "tax_parcel_id": None,
+                "tax_record_last_update": None,
+            }
+        
+        return {
+            "apn": tax_record.get("apn"),
+            "public_record_id": tax_record.get("public_record_id"),
+            "tax_parcel_id": tax_record.get("tax_parcel_id"),
+            "tax_record_last_update": tax_record.get("last_update_date"),
+        }
+
+    def _parse_property_fees(self, result: dict) -> dict:
+        """Parse property fees (monthly, one-time, parking) from result."""
+        return {
+            "monthly_fees": self._format_fees(result.get("monthly_fees")),
+            "one_time_fees": self._format_fees(result.get("one_time_fees")),
+            "parking_details": self._format_parking_details(result.get("parking")),
+        }
+
+    def _parse_rental_data(self, result: dict) -> dict:
+        """Parse rental-specific data from result."""
+        return {
+            "pet_friendly": self._format_pet_policy(result.get("pet_policy")),
+            "lease_terms": self._format_lease_terms(result.get("terms")),
+            "unit_count": self._get_unit_count(result.get("units")),
+            "available_units": self._get_available_units(result.get("units")),
+            "rental_management_name": self._get_rental_management_name(result.get("advertisers")),
+            "rental_management_href": self._get_rental_management_href(result.get("advertisers")),
+        }
+
+    def _format_property_tags(self, tags) -> str | None:
+        """Format property tags into a comma-separated string."""
+        if not tags:
+            return None
+        return ", ".join(tags) if isinstance(tags, list) else str(tags)
+
+    def _format_property_details(self, details) -> str | None:
+        """Format structured property details into a readable string."""
+        if not details or not isinstance(details, list):
+            return None
+        
+        details_text = []
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            
+            category = detail.get("category", "")
+            text = detail.get("text", "")
+            parent_category = detail.get("parent_category", "")
+            
+            if category and text:
+                details_text.append(f"{category}: {text}")
+            elif parent_category and text:
+                details_text.append(f"{parent_category}: {text}")
+        
+        return "; ".join(details_text) if details_text else None
+
+    def _format_fees(self, fees_data) -> str | None:
+        """Format fee data into a readable string."""
+        if not fees_data or not isinstance(fees_data, list):
+            return None
+        
+        fees_text = []
+        for fee in fees_data:
+            if isinstance(fee, dict):
+                description = fee.get("description", "")
+                amount = fee.get("display_amount", "")
+                if description and amount:
+                    fees_text.append(f"{description}: {amount}")
+        
+        return "; ".join(fees_text) if fees_text else None
+
+    def _format_parking_details(self, parking) -> str | None:
+        """Format parking details into a readable string."""
+        if not parking or not isinstance(parking, dict):
+            return None
+        
+        parking_list = []
+        if assigned_rent := parking.get("assigned_space_rent"):
+            parking_list.append(f"Assigned space: {assigned_rent}")
+        if unassigned_rent := parking.get("unassigned_space_rent"):
+            parking_list.append(f"Unassigned space: {unassigned_rent}")
+        if available := parking.get("assigned_spaces_available"):
+            parking_list.append(f"Available spaces: {available}")
+        if desc := parking.get("description"):
+            parking_list.append(desc)
+        
+        return "; ".join(parking_list) if parking_list else None
+
+    def _format_pet_policy(self, pet_policy) -> str | None:
+        """Format pet policy into a readable string."""
+        if not pet_policy or not isinstance(pet_policy, dict):
+            return None
+        
+        pet_list = []
+        if pet_policy.get("cats"):
+            pet_list.append("Cats")
+        if pet_policy.get("dogs"):
+            pet_list.append("Dogs")
+        if pet_policy.get("dogs_small"):
+            pet_list.append("Small Dogs")
+        if pet_policy.get("dogs_large"):
+            pet_list.append("Large Dogs")
+        
+        return ", ".join(pet_list) if pet_list else "No pets allowed"
+
+    def _format_lease_terms(self, terms) -> str | None:
+        """Format lease terms into a readable string."""
+        if not terms or not isinstance(terms, list):
+            return None
+        
+        lease_list = []
+        for term in terms:
+            if isinstance(term, dict):
+                text = term.get("text", "")
+                category = term.get("category", "")
+                if text and (category == "lease" or "lease" in text.lower()):
+                    lease_list.append(text)
+        
+        return "; ".join(lease_list) if lease_list else None
+
+    def _get_unit_count(self, units) -> int | None:
+        """Get total unit count from units data."""
+        return len(units) if units and isinstance(units, list) else None
+
+    def _get_available_units(self, units) -> int | None:
+        """Get available unit count from units data."""
+        if not units or not isinstance(units, list):
+            return None
+        
+        available_list = [unit for unit in units if isinstance(unit, dict) and unit.get("availability")]
+        return len(available_list)
+
+    def _get_rental_management_name(self, advertisers) -> str | None:
+        """Extract rental management name from advertisers data."""
+        if not advertisers or not isinstance(advertisers, list):
+            return None
+        
+        for advertiser in advertisers:
+            if isinstance(advertiser, dict):
+                if rental_mgmt := advertiser.get("rental_management"):
+                    if isinstance(rental_mgmt, dict):
+                        return rental_mgmt.get("name")
+        return None
+
+    def _get_rental_management_href(self, advertisers) -> str | None:
+        """Extract rental management href from advertisers data."""
+        if not advertisers or not isinstance(advertisers, list):
+            return None
+        
+        for advertiser in advertisers:
+            if isinstance(advertiser, dict):
+                if rental_mgmt := advertiser.get("rental_management"):
+                    if isinstance(rental_mgmt, dict):
+                        return rental_mgmt.get("href")
+        return None
 
     def general_search(self, variables: dict, search_type: str) -> Dict[str, Union[int, Union[list[Property], list[dict]]]]:
         """

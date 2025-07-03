@@ -29,29 +29,51 @@ ordered_properties = [
     "list_price_min",
     "list_price_max",
     "list_date",
+    "pending_date",
     "sold_price",
     "last_sold_date",
     "assessed_value",
     "estimated_value",
+    "estimate_high",
+    "estimate_low",
+    "estimate_source",
+    "estimate_date",
     "tax",
     "tax_history",
+    "apn",
+    "public_record_id",
+    "tax_record_last_update",
+    "tax_parcel_id",
     "new_construction",
     "lot_sqft",
     "price_per_sqft",
     "latitude",
     "longitude",
+    "street_number",
+    "street_direction",
+    "street_suffix",
     "neighborhoods",
     "county",
     "fips_code",
     "stories",
     "hoa_fee",
+    "monthly_fees",
+    "one_time_fees",
     "parking_garage",
+    "parking_details",
+    "property_tags",
+    "property_details",
+    "pet_friendly",
+    "lease_terms",
+    "unit_count",
+    "available_units",
     "agent_id",
     "agent_name",
     "agent_email",
     "agent_phones",
     "agent_mls_set",
     "agent_nrds_id",
+    "agent_href",
     "broker_id",
     "broker_name",
     "builder_id",
@@ -61,6 +83,9 @@ ordered_properties = [
     "office_name",
     "office_email",
     "office_phones",
+    "office_href",
+    "rental_management_name",
+    "rental_management_href",
     "nearby_schools",
     "primary_photo",
     "alt_photos",
@@ -71,8 +96,9 @@ def process_result(result: Property) -> pd.DataFrame:
     prop_data = {prop: None for prop in ordered_properties}
     prop_data.update(result.__dict__)
 
-    if "address" in prop_data:
-        address_data = prop_data["address"]
+    # Handle address
+    if hasattr(result, "address") and result.address:
+        address_data = result.address
         prop_data["full_street_line"] = address_data.full_line
         prop_data["street"] = address_data.street
         prop_data["unit"] = address_data.unit
@@ -80,8 +106,9 @@ def process_result(result: Property) -> pd.DataFrame:
         prop_data["state"] = address_data.state
         prop_data["zip_code"] = address_data.zip
 
-    if "advertisers" in prop_data and prop_data.get("advertisers"):
-        advertiser_data: Advertisers | None = prop_data["advertisers"]
+    # Handle advertisers
+    if hasattr(result, "advertisers") and result.advertisers:
+        advertiser_data: Advertisers = result.advertisers
         if advertiser_data.agent:
             agent_data = advertiser_data.agent
             prop_data["agent_id"] = agent_data.uuid
@@ -90,6 +117,7 @@ def process_result(result: Property) -> pd.DataFrame:
             prop_data["agent_phones"] = agent_data.phones
             prop_data["agent_mls_set"] = agent_data.mls_set
             prop_data["agent_nrds_id"] = agent_data.nrds_id
+            prop_data["agent_href"] = agent_data.href
 
         if advertiser_data.broker:
             broker_data = advertiser_data.broker
@@ -108,11 +136,14 @@ def process_result(result: Property) -> pd.DataFrame:
             prop_data["office_email"] = office_data.email
             prop_data["office_phones"] = office_data.phones
             prop_data["office_mls_set"] = office_data.mls_set
+            prop_data["office_href"] = office_data.href
 
+    # Handle existing fields
     prop_data["price_per_sqft"] = prop_data["prc_sqft"]
     prop_data["nearby_schools"] = filter(None, prop_data["nearby_schools"]) if prop_data["nearby_schools"] else None
     prop_data["nearby_schools"] = ", ".join(set(prop_data["nearby_schools"])) if prop_data["nearby_schools"] else None
 
+    # Handle description
     description = result.description
     if description:
         prop_data["primary_photo"] = description.primary_photo
@@ -164,3 +195,4 @@ def validate_limit(limit: int) -> None:
 
     if limit is not None and (limit < 1 or limit > 10000):
         raise ValueError("Property limit must be between 1 and 10,000.")
+    

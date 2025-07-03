@@ -153,17 +153,19 @@ class Advertisers:
 @dataclass
 class Property:
     property_url: str
-
     property_id: str
-    #: allows_cats: bool
-    #: allows_dogs: bool
 
     listing_id: str | None = None
-
+    
     mls: str | None = None
     mls_id: str | None = None
     status: str | None = None
     address: Address | None = None
+
+    # Enhanced address components (new fields)
+    street_number: str | None = None
+    street_direction: str | None = None
+    street_suffix: str | None = None
 
     list_price: int | None = None
     list_price_min: int | None = None
@@ -178,6 +180,8 @@ class Property:
     days_on_mls: int | None = None
     description: Description | None = None
     tags: list[str] | None = None
+    property_tags: str | None = None
+    property_details: str | None = None
     details: list[dict] | None = None
 
     latitude: float | None = None
@@ -188,7 +192,35 @@ class Property:
     nearby_schools: list[str] = None
     assessed_value: int | None = None
     estimated_value: int | None = None
+    
+    # Enhanced estimate data (new fields)
+    estimate_high: int | None = None
+    estimate_low: int | None = None
+    estimate_source: str | None = None
+    estimate_date: str | None = None
+    
     tax: int | None = None
     tax_history: list[dict] | None = None
+    
+    # Tax record details (new fields)
+    apn: str | None = None
+    public_record_id: str | None = None
+    tax_parcel_id: str | None = None
+    tax_record_last_update: str | None = None
+    
+    # Property fees (new fields)
+    monthly_fees: str | None = None
+    one_time_fees: str | None = None
+    parking_details: str | None = None
+    
+    # Rental-specific info (new fields)
+    pet_friendly: str | None = None
+    lease_terms: str | None = None
+    unit_count: int | None = None
+    available_units: int | None = None
+    
+    # Rental management (new fields)
+    rental_management_name: str | None = None
+    rental_management_href: str | None = None
 
     advertisers: Advertisers | None = None
