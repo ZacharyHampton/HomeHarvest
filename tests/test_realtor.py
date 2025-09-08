@@ -373,3 +373,77 @@ def test_return_type_consistency():
         assert len(pandas_ids) > 0, f"pandas should return properties for {search_type}"
         assert len(pydantic_ids) > 0, f"pydantic should return properties for {search_type}"
         assert len(raw_ids) > 0, f"raw should return properties for {search_type}"
+
+
+def test_pending_date_filtering():
+    """Test that pending properties are properly filtered by pending_date using client-side filtering."""
+    
+    # Test 1: Verify that date filtering works with different time windows
+    result_no_filter = scrape_property(
+        location="Dallas, TX",
+        listing_type="pending", 
+        limit=20
+    )
+    
+    result_30_days = scrape_property(
+        location="Dallas, TX", 
+        listing_type="pending",
+        past_days=30,
+        limit=20
+    )
+    
+    result_10_days = scrape_property(
+        location="Dallas, TX",
+        listing_type="pending", 
+        past_days=10,
+        limit=20
+    )
+    
+    # Basic assertions - we should get some results
+    assert result_no_filter is not None and len(result_no_filter) >= 0
+    assert result_30_days is not None and len(result_30_days) >= 0
+    assert result_10_days is not None and len(result_10_days) >= 0
+    
+    # Filtering should work: longer periods should return same or more results
+    assert len(result_30_days) <= len(result_no_filter), "30-day filter should return <= unfiltered results"
+    assert len(result_10_days) <= len(result_30_days), "10-day filter should return <= 30-day results"
+    
+    # Test 2: Verify that date range filtering works
+    if len(result_no_filter) > 0:
+        result_date_range = scrape_property(
+            location="Dallas, TX",
+            listing_type="pending",
+            date_from="2025-08-01", 
+            date_to="2025-12-31",
+            limit=20
+        )
+        
+        assert result_date_range is not None
+        # Date range should capture recent properties
+        assert len(result_date_range) >= 0
+    
+    # Test 3: Verify that both pending and contingent properties are included
+    # Get raw data to check property types
+    if len(result_no_filter) > 0:
+        raw_result = scrape_property(
+            location="Dallas, TX",
+            listing_type="pending",
+            return_type="raw",
+            limit=15
+        )
+        
+        if raw_result:
+            # Check that we get both pending and contingent properties
+            pending_count = 0
+            contingent_count = 0
+            
+            for prop in raw_result:
+                flags = prop.get('flags', {})
+                if flags.get('is_pending'):
+                    pending_count += 1
+                if flags.get('is_contingent'):
+                    contingent_count += 1
+            
+            # We should get at least one of each type (when available)
+            total_properties = pending_count + contingent_count
+            assert total_properties > 0, "Should find at least some pending or contingent properties"

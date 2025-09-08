@@ -202,6 +202,11 @@ fragment HomeData on Home {
         }
     }
     taxHistory: tax_history { __typename tax year assessment { __typename building land total } }
+    property_history {
+        date
+        event_name
+        price
+    }
     monthly_fees {
         description
         display_amount

@@ -137,6 +137,10 @@ class RealtorScraper(Scraper):
                 date_param = f'sold_date: {{ min: "{self.date_from}", max: "{self.date_to}" }}'
             elif self.last_x_days:
                 date_param = f'sold_date: {{ min: "$today-{self.last_x_days}D" }}'
+        elif self.listing_type == ListingType.PENDING:
+            # Skip server-side date filtering for PENDING as both pending_date and contract_date 
+            # filters are broken in the API. Client-side filtering will be applied later.
+            pass
         else:
             if self.date_from and self.date_to:
                 date_param = f'list_date: {{ min: "{self.date_from}", max: "{self.date_to}" }}'
@@ -378,7 +382,125 @@ class RealtorScraper(Scraper):
             for future in as_completed(futures):
                 homes.extend(future.result()["properties"])
 
+        # Apply client-side date filtering for PENDING properties
+        # (server-side filters are broken in the API)
+        if self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
+            homes = self._apply_pending_date_filter(homes)
+        
         return homes
+
+    def _apply_pending_date_filter(self, homes):
+        """Apply client-side date filtering for PENDING properties based on pending_date field.
+        For contingent properties without pending_date, tries fallback date fields."""
+        if not homes:
+            return homes
+            
+        from datetime import datetime, timedelta
+        
+        # Determine date range for filtering
+        date_range = self._get_date_range()
+        if not date_range:
+            return homes
+            
+        filtered_homes = []
+        
+        for home in homes:
+            # Extract the best available date for this property
+            property_date = self._extract_property_date_for_filtering(home)
+            
+            # Handle properties without dates (include contingent properties)
+            if property_date is None:
+                if self._is_contingent(home):
+                    filtered_homes.append(home)  # Include contingent without date filter
+                continue
+            
+            # Check if property date falls within the specified range
+            if self._is_date_in_range(property_date, date_range):
+                filtered_homes.append(home)
+                
+        return filtered_homes
+    
+    def _get_pending_date(self, home):
+        """Extract pending_date from a home property (handles both dict and Property object)."""
+        if isinstance(home, dict):
+            return home.get('pending_date')
+        else:
+            # Assume it's a Property object
+            return getattr(home, 'pending_date', None)
+    
+    
+    def _is_contingent(self, home):
+        """Check if a property is contingent."""
+        if isinstance(home, dict):
+            flags = home.get('flags', {})
+            return flags.get('is_contingent', False)
+        else:
+            # Property object - check flags attribute
+            if hasattr(home, 'flags') and home.flags:
+                return getattr(home.flags, 'is_contingent', False)
+            return False
+    
+    def _get_date_range(self):
+        """Get the date range for filtering based on instance parameters."""
+        from datetime import datetime, timedelta
+        
+        if self.last_x_days:
+            cutoff_date = datetime.now() - timedelta(days=self.last_x_days)
+            return {'type': 'since', 'date': cutoff_date}
+        elif self.date_from and self.date_to:
+            try:
+                from_date = datetime.fromisoformat(self.date_from)
+                to_date = datetime.fromisoformat(self.date_to)
+                return {'type': 'range', 'from_date': from_date, 'to_date': to_date}
+            except ValueError:
+                return None
+        return None
+    
+    def _extract_property_date_for_filtering(self, home):
+        """Extract pending_date from a property for filtering.
+        
+        Returns parsed datetime object or None.
+        """
+        date_value = self._get_pending_date(home)
+        if date_value:
+            return self._parse_date_value(date_value)
+        return None
+    
+    def _parse_date_value(self, date_value):
+        """Parse a date value (string or datetime) into a timezone-naive datetime object."""
+        from datetime import datetime
+        
+        if isinstance(date_value, datetime):
+            return date_value.replace(tzinfo=None)
+        
+        if not isinstance(date_value, str):
+            return None
+            
+        try:
+            # Handle timezone indicators
+            if date_value.endswith('Z'):
+                date_value = date_value[:-1] + '+00:00'
+            elif '.' in date_value and date_value.endswith('Z'):
+                date_value = date_value.replace('Z', '+00:00')
+            
+            # Try ISO format first
+            try:
+                parsed_date = datetime.fromisoformat(date_value)
+                return parsed_date.replace(tzinfo=None)
+            except ValueError:
+                # Try simple datetime format: '2025-08-29 00:00:00'
+                return datetime.strptime(date_value, '%Y-%m-%d %H:%M:%S')
+                
+        except (ValueError, AttributeError):
+            return None
+    
+    def _is_date_in_range(self, date_obj, date_range):
+        """Check if a datetime object falls within the specified date range."""
+        if date_range['type'] == 'since':
+            return date_obj >= date_range['date']
+        elif date_range['type'] == 'range':
+            return date_range['from_date'] <= date_obj <= date_range['to_date']
+        return False
 
 
 

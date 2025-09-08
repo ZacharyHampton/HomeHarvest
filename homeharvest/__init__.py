@@ -32,6 +32,9 @@ def scrape_property(
     :param mls_only: If set, fetches only listings with MLS IDs.
     :param proxy: Proxy to use for scraping
     :param past_days: Get properties sold or listed (dependent on your listing_type) in the last _ days.
+        - PENDING: Filters by pending_date. Contingent properties without pending_date are included.
+        - SOLD: Filters by sold_date (when property was sold)
+        - FOR_SALE/FOR_RENT: Filters by list_date (when property was listed)
     :param date_from, date_to: Get properties sold or listed (dependent on your listing_type) between these dates. format: 2021-01-28
     :param foreclosure: If set, fetches only foreclosure listings.
     :param extra_property_data: Increases requests by O(n). If set, this fetches additional property data (e.g. agent, broker, property evaluations etc.)
