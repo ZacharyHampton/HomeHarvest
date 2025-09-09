@@ -2,6 +2,8 @@
 
 **HomeHarvest** is a real estate scraping library that extracts and formats data in the style of MLS listings.
 
+- 🚀 [HomeHarvest MCP](https://smithery.ai/server/@ZacharyHampton/homeharvest-mcp) - Easily get property data, in your agent. Try it out now!
+
 ## HomeHarvest Features
 
 - **Source**: Fetches properties directly from **Realtor.com**.
