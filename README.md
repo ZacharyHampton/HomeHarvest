@@ -2,7 +2,8 @@
 
 **HomeHarvest** is a real estate scraping library that extracts and formats data in the style of MLS listings.
 
-- 🚀 [HomeHarvest MCP](https://smithery.ai/server/@ZacharyHampton/homeharvest-mcp) - Easily get property data, in your agent. Try it out now!
+- 🚀 [HomeHarvest MCP](https://smithery.ai/server/@ZacharyHampton/homeharvest-mcp) - Easily get property data in your agent.
+- 🏠 [Zillow API](https://rapidapi.com/zachary-l1izVlvs2/api/zillow-com9) - Get Zillow data with ease.
 
 ## HomeHarvest Features
 
