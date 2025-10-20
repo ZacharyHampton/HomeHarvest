@@ -27,6 +27,29 @@ class ScraperInput(BaseModel):
     limit: int = 10000
     return_type: ReturnType = ReturnType.pandas
 
+    # New date/time filtering parameters
+    past_hours: int | None = None
+    datetime_from: str | None = None
+    datetime_to: str | None = None
+
+    # New property filtering parameters
+    beds_min: int | None = None
+    beds_max: int | None = None
+    baths_min: float | None = None
+    baths_max: float | None = None
+    sqft_min: int | None = None
+    sqft_max: int | None = None
+    price_min: int | None = None
+    price_max: int | None = None
+    lot_sqft_min: int | None = None
+    lot_sqft_max: int | None = None
+    year_built_min: int | None = None
+    year_built_max: int | None = None
+
+    # New sorting parameters
+    sort_by: str | None = None
+    sort_direction: str = "desc"
+
 
 class Scraper:
     session = None
@@ -84,6 +107,29 @@ class Scraper:
         self.exclude_pending = scraper_input.exclude_pending
         self.limit = scraper_input.limit
         self.return_type = scraper_input.return_type
+
+        # New date/time filtering
+        self.past_hours = scraper_input.past_hours
+        self.datetime_from = scraper_input.datetime_from
+        self.datetime_to = scraper_input.datetime_to
+
+        # New property filtering
+        self.beds_min = scraper_input.beds_min
+        self.beds_max = scraper_input.beds_max
+        self.baths_min = scraper_input.baths_min
+        self.baths_max = scraper_input.baths_max
+        self.sqft_min = scraper_input.sqft_min
+        self.sqft_max = scraper_input.sqft_max
+        self.price_min = scraper_input.price_min
+        self.price_max = scraper_input.price_max
+        self.lot_sqft_min = scraper_input.lot_sqft_min
+        self.lot_sqft_max = scraper_input.lot_sqft_max
+        self.year_built_min = scraper_input.year_built_min
+        self.year_built_max = scraper_input.year_built_max
+
+        # New sorting
+        self.sort_by = scraper_input.sort_by
+        self.sort_direction = scraper_input.sort_direction
 
     def search(self) -> list[Union[Property | dict]]: ...
 

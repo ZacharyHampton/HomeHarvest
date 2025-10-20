@@ -66,6 +66,97 @@ properties = scrape_property(
 )
 ```
 
+### Advanced Filtering Examples
+
+#### Hour-Based Filtering
+```py
+# Get properties listed in the last 24 hours
+properties = scrape_property(
+    location="Austin, TX",
+    listing_type="for_sale",
+    past_hours=24
+)
+
+# Get properties listed during specific hours (e.g., business hours)
+properties = scrape_property(
+    location="Dallas, TX",
+    listing_type="for_sale",
+    datetime_from="2025-01-20T09:00:00",
+    datetime_to="2025-01-20T17:00:00"
+)
+```
+
+#### Property Filters
+```py
+# Filter by bedrooms, bathrooms, and square footage
+properties = scrape_property(
+    location="San Francisco, CA",
+    listing_type="for_sale",
+    beds_min=2,
+    beds_max=4,
+    baths_min=2.0,
+    sqft_min=1000,
+    sqft_max=2500
+)
+
+# Filter by price range
+properties = scrape_property(
+    location="Phoenix, AZ",
+    listing_type="for_sale",
+    price_min=200000,
+    price_max=500000
+)
+
+# Filter by year built
+properties = scrape_property(
+    location="Seattle, WA",
+    listing_type="for_sale",
+    year_built_min=2000,
+    beds_min=3
+)
+
+# Combine multiple filters
+properties = scrape_property(
+    location="Denver, CO",
+    listing_type="for_sale",
+    beds_min=3,
+    baths_min=2.0,
+    sqft_min=1500,
+    price_min=300000,
+    price_max=600000,
+    year_built_min=1990,
+    lot_sqft_min=5000
+)
+```
+
+#### Sorting Results
+```py
+# Sort by price (cheapest first)
+properties = scrape_property(
+    location="Miami, FL",
+    listing_type="for_sale",
+    sort_by="list_price",
+    sort_direction="asc",
+    limit=100
+)
+
+# Sort by newest listings
+properties = scrape_property(
+    location="Boston, MA",
+    listing_type="for_sale",
+    sort_by="list_date",
+    sort_direction="desc"
+)
+
+# Sort by square footage (largest first)
+properties = scrape_property(
+    location="Los Angeles, CA",
+    listing_type="for_sale",
+    sort_by="sqft",
+    sort_direction="desc"
+)
+```
+
 ## Output
 ```plaintext
 >>> properties.head()
@@ -137,10 +228,45 @@ Optional
 ├── past_days (integer): Number of past days to filter properties. Utilizes 'last_sold_date' for 'sold' listing types, and 'list_date' for others (for_rent, for_sale).
 │    Example: 30 (fetches properties listed/sold in the last 30 days)
 │
+├── past_hours (integer): Number of past hours to filter properties (more precise than past_days). Uses client-side filtering.
+│    Example: 24 (fetches properties from the last 24 hours)
+│    Note: Cannot be used together with past_days or date_from/date_to
+│
 ├── date_from, date_to (string): Start and end dates to filter properties listed or sold, both dates are required.
 |    (use this to get properties in chunks as there's a 10k result limit)
 │    Format for both must be "YYYY-MM-DD".
 │    Example: "2023-05-01", "2023-05-15" (fetches properties listed/sold between these dates)
+│
+├── datetime_from, datetime_to (string): ISO 8601 datetime strings for hour-precise filtering. Uses client-side filtering.
+│    Format: "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD"
+│    Example: "2025-01-20T09:00:00", "2025-01-20T17:00:00" (fetches properties between 9 AM and 5 PM)
+│    Note: Cannot be used together with date_from/date_to
+│
+├── beds_min, beds_max (integer): Filter by number of bedrooms
+│    Example: beds_min=2, beds_max=4 (2-4 bedrooms)
+│
+├── baths_min, baths_max (float): Filter by number of bathrooms
+│    Example: baths_min=2.0, baths_max=3.5 (2-3.5 bathrooms)
+│
+├── sqft_min, sqft_max (integer): Filter by square footage
+│    Example: sqft_min=1000, sqft_max=2500 (1,000-2,500 sq ft)
+│
+├── price_min, price_max (integer): Filter by listing price
+│    Example: price_min=200000, price_max=500000 ($200k-$500k)
+│
+├── lot_sqft_min, lot_sqft_max (integer): Filter by lot size in square feet
+│    Example: lot_sqft_min=5000, lot_sqft_max=10000 (5,000-10,000 sq ft lot)
+│
+├── year_built_min, year_built_max (integer): Filter by year built
+│    Example: year_built_min=2000, year_built_max=2024 (built between 2000-2024)
+│
+├── sort_by (string): Sort results by field
+│    Options: 'list_date', 'sold_date', 'list_price', 'sqft', 'beds', 'baths'
+│    Example: sort_by='list_price'
+│
+├── sort_direction (string): Sort direction, default is 'desc'
+│    Options: 'asc' (ascending), 'desc' (descending)
+│    Example: sort_direction='asc' (cheapest first)
 │
 ├── mls_only (True/False): If set, fetches only MLS listings (mainly applicable to 'sold' listings)
 │
@@ -194,10 +320,10 @@ Property
 │ ├── list_price
 │ ├── list_price_min
 │ ├── list_price_max
-│ ├── list_date  # datetime
-│ ├── pending_date  # datetime
+│ ├── list_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
+│ ├── pending_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── sold_price
-│ ├── last_sold_date  # datetime
+│ ├── last_sold_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── last_sold_price
 │ ├── price_per_sqft
 │ ├── new_construction

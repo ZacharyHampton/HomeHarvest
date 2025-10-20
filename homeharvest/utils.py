@@ -119,10 +119,10 @@ def process_result(result: Property) -> pd.DataFrame:
     prop_data["nearby_schools"] = filter(None, prop_data["nearby_schools"]) if prop_data["nearby_schools"] else None
     prop_data["nearby_schools"] = ", ".join(set(prop_data["nearby_schools"])) if prop_data["nearby_schools"] else None
     
-    # Convert datetime objects to strings for CSV
+    # Convert datetime objects to strings for CSV (preserve full datetime including time)
     for date_field in ["list_date", "pending_date", "last_sold_date"]:
         if prop_data.get(date_field):
-            prop_data[date_field] = prop_data[date_field].strftime("%Y-%m-%d") if hasattr(prop_data[date_field], 'strftime') else prop_data[date_field]
+            prop_data[date_field] = prop_data[date_field].strftime("%Y-%m-%d %H:%M:%S") if hasattr(prop_data[date_field], 'strftime') else prop_data[date_field]
     
     # Convert HttpUrl objects to strings for CSV
     if prop_data.get("property_url"):
@@ -179,3 +179,65 @@ def validate_limit(limit: int) -> None:
 
     if limit is not None and (limit < 1 or limit > 10000):
         raise ValueError("Property limit must be between 1 and 10,000.")
+
+
+def validate_datetime(datetime_str: str | None) -> None:
+    """Validate ISO 8601 datetime format."""
+    if not datetime_str:
+        return
+
+    try:
+        # Try parsing as ISO 8601 datetime
+        datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        raise InvalidDate(
+            f"Invalid datetime format: '{datetime_str}'. "
+            f"Expected ISO 8601 format (e.g., '2025-01-20T14:30:00' or '2025-01-20')."
+        )
+
+
+def validate_filters(
+    beds_min: int | None = None,
+    beds_max: int | None = None,
+    baths_min: float | None = None,
+    baths_max: float | None = None,
+    sqft_min: int | None = None,
+    sqft_max: int | None = None,
+    price_min: int | None = None,
+    price_max: int | None = None,
+    lot_sqft_min: int | None = None,
+    lot_sqft_max: int | None = None,
+    year_built_min: int | None = None,
+    year_built_max: int | None = None,
+) -> None:
+    """Validate that min values are less than max values for range filters."""
+    ranges = [
+        ("beds", beds_min, beds_max),
+        ("baths", baths_min, baths_max),
+        ("sqft", sqft_min, sqft_max),
+        ("price", price_min, price_max),
+        ("lot_sqft", lot_sqft_min, lot_sqft_max),
+        ("year_built", year_built_min, year_built_max),
+    ]
+
+    for name, min_val, max_val in ranges:
+        if min_val is not None and max_val is not None and min_val > max_val:
+            raise ValueError(f"{name}_min ({min_val}) cannot be greater than {name}_max ({max_val}).")
+
+
+def validate_sort(sort_by: str | None, sort_direction: str | None = "desc") -> None:
+    """Validate sort parameters."""
+    valid_sort_fields = ["list_date", "sold_date", "list_price", "sqft", "beds", "baths"]
+    valid_directions = ["asc", "desc"]
+
+    if sort_by and sort_by not in valid_sort_fields:
+        raise ValueError(
+            f"Invalid sort_by value: '{sort_by}'. "
+            f"Valid options: {', '.join(valid_sort_fields)}"
+        )
+
+    if sort_direction and sort_direction not in valid_directions:
+        raise ValueError(
+            f"Invalid sort_direction value: '{sort_direction}'. "
+            f"Valid options: {', '.join(valid_directions)}"
+        )
