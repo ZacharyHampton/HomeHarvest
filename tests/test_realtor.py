@@ -506,6 +506,106 @@ def test_hour_based_filtering():
                     pass  # Skip if date parsing fails
 
 
+def test_past_hours_all_listing_types():
+    """Validate that past_hours works correctly for all listing types with proper date fields"""
+    from datetime import datetime, timedelta
+
+    # Test 1: SOLD (uses last_sold_date field, server-side filters by sold_date)
+    result_sold = scrape_property(
+        location="Dallas, TX",
+        listing_type="sold",
+        past_hours=48,
+        limit=20
+    )
+
+    assert result_sold is not None
+    if len(result_sold) > 0:
+        cutoff_48h = datetime.now() - timedelta(hours=48)
+
+        # Verify results use sold_date and are within 48 hours
+        for idx in range(min(5, len(result_sold))):
+            sold_date_str = result_sold.iloc[idx]["last_sold_date"]
+            if pd.notna(sold_date_str):
+                try:
+                    sold_date = datetime.strptime(str(sold_date_str), "%Y-%m-%d %H:%M:%S")
+                    assert sold_date >= cutoff_48h, \
+                        f"SOLD: last_sold_date {sold_date} should be within 48 hours"
+                except (ValueError, TypeError):
+                    pass
+
+    # Test 2: FOR_SALE (uses list_date field, server-side filters by list_date)
+    result_for_sale = scrape_property(
+        location="Austin, TX",
+        listing_type="for_sale",
+        past_hours=48,
+        limit=20
+    )
+
+    assert result_for_sale is not None
+    if len(result_for_sale) > 0:
+        cutoff_48h = datetime.now() - timedelta(hours=48)
+
+        # Verify results use list_date and are within 48 hours
+        for idx in range(min(5, len(result_for_sale))):
+            list_date_str = result_for_sale.iloc[idx]["list_date"]
+            if pd.notna(list_date_str):
+                try:
+                    list_date = datetime.strptime(str(list_date_str), "%Y-%m-%d %H:%M:%S")
+                    assert list_date >= cutoff_48h, \
+                        f"FOR_SALE: list_date {list_date} should be within 48 hours"
+                except (ValueError, TypeError):
+                    pass
+
+    # Test 3: FOR_RENT (uses list_date field, server-side filters by list_date)
+    result_for_rent = scrape_property(
+        location="Houston, TX",
+        listing_type="for_rent",
+        past_hours=72,
+        limit=20
+    )
+
+    assert result_for_rent is not None
+    if len(result_for_rent) > 0:
+        cutoff_72h = datetime.now() - timedelta(hours=72)
+
+        # Verify results use list_date and are within 72 hours
+        for idx in range(min(5, len(result_for_rent))):
+            list_date_str = result_for_rent.iloc[idx]["list_date"]
+            if pd.notna(list_date_str):
+                try:
+                    list_date = datetime.strptime(str(list_date_str), "%Y-%m-%d %H:%M:%S")
+                    assert list_date >= cutoff_72h, \
+                        f"FOR_RENT: list_date {list_date} should be within 72 hours"
+                except (ValueError, TypeError):
+                    pass
+
+    # Test 4: PENDING (uses pending_date field, client-side filtering only)
+    result_pending = scrape_property(
+        location="San Antonio, TX",
+        listing_type="pending",
+        past_hours=48,
+        limit=20
+    )
+
+    assert result_pending is not None
+    # Note: PENDING doesn't use server-side date filtering (API filters broken)
+    # Client-side filtering should still work via pending_date
+    if len(result_pending) > 0:
+        cutoff_48h = datetime.now() - timedelta(hours=48)
+
+        # Verify results use pending_date (or are contingent without date)
+        for idx in range(min(5, len(result_pending))):
+            pending_date_str = result_pending.iloc[idx]["pending_date"]
+            if pd.notna(pending_date_str):
+                try:
+                    pending_date = datetime.strptime(str(pending_date_str), "%Y-%m-%d %H:%M:%S")
+                    assert pending_date >= cutoff_48h, \
+                        f"PENDING: pending_date {pending_date} should be within 48 hours"
+                except (ValueError, TypeError):
+                    pass
+            # else: property is contingent without pending_date, which is allowed
+
+
 def test_datetime_filtering():
     """Test datetime_from and datetime_to parameters with hour precision"""
     from datetime import datetime, timedelta
