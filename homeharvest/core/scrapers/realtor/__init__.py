@@ -132,35 +132,137 @@ class RealtorScraper(Scraper):
         """
 
         date_param = ""
+
+        # Determine date field based on listing type
         if self.listing_type == ListingType.SOLD:
-            if self.date_from and self.date_to:
-                date_param = f'sold_date: {{ min: "{self.date_from}", max: "{self.date_to}" }}'
-            elif self.last_x_days:
-                date_param = f'sold_date: {{ min: "$today-{self.last_x_days}D" }}'
-        elif self.listing_type == ListingType.PENDING:
-            # Skip server-side date filtering for PENDING as both pending_date and contract_date 
+            date_field = "sold_date"
+        elif self.listing_type in [ListingType.FOR_SALE, ListingType.FOR_RENT]:
+            date_field = "list_date"
+        else:  # PENDING
+            # Skip server-side date filtering for PENDING as both pending_date and contract_date
             # filters are broken in the API. Client-side filtering will be applied later.
-            pass
-        else:
-            if self.date_from and self.date_to:
-                date_param = f'list_date: {{ min: "{self.date_from}", max: "{self.date_to}" }}'
+            date_field = None
+
+        # Build date parameter (expand to full days if hour-based filtering is used)
+        if date_field:
+            if self.datetime_from or self.datetime_to:
+                # Hour-based datetime filtering: extract date parts for API, client-side filter by hours
+                from datetime import datetime
+
+                min_date = None
+                max_date = None
+
+                if self.datetime_from:
+                    try:
+                        dt_from = datetime.fromisoformat(self.datetime_from.replace('Z', '+00:00'))
+                        min_date = dt_from.strftime("%Y-%m-%d")
+                    except (ValueError, AttributeError):
+                        pass
+
+                if self.datetime_to:
+                    try:
+                        dt_to = datetime.fromisoformat(self.datetime_to.replace('Z', '+00:00'))
+                        max_date = dt_to.strftime("%Y-%m-%d")
+                    except (ValueError, AttributeError):
+                        pass
+
+                if min_date and max_date:
+                    date_param = f'{date_field}: {{ min: "{min_date}", max: "{max_date}" }}'
+                elif min_date:
+                    date_param = f'{date_field}: {{ min: "{min_date}" }}'
+                elif max_date:
+                    date_param = f'{date_field}: {{ max: "{max_date}" }}'
+
+            elif self.past_hours:
+                # Query API for past N days (minimum 1 day), client-side filter by hours
+                days = max(1, int(self.past_hours / 24) + 1)  # Round up to cover the full period
+                date_param = f'{date_field}: {{ min: "$today-{days}D" }}'
+
+            elif self.date_from and self.date_to:
+                date_param = f'{date_field}: {{ min: "{self.date_from}", max: "{self.date_to}" }}'
             elif self.last_x_days:
-                date_param = f'list_date: {{ min: "$today-{self.last_x_days}D" }}'
+                date_param = f'{date_field}: {{ min: "$today-{self.last_x_days}D" }}'
 
         property_type_param = ""
         if self.property_type:
             property_types = [pt.value for pt in self.property_type]
             property_type_param = f"type: {json.dumps(property_types)}"
 
-        sort_param = (
-            "sort: [{ field: sold_date, direction: desc }]"
-            if self.listing_type == ListingType.SOLD
-            else ""  #: "sort: [{ field: list_date, direction: desc }]"  #: prioritize normal fractal sort from realtor
-        )
+        # Build property filter parameters
+        property_filters = []
+
+        if self.beds_min is not None or self.beds_max is not None:
+            beds_filter = "beds: {"
+            if self.beds_min is not None:
+                beds_filter += f" min: {self.beds_min}"
+            if self.beds_max is not None:
+                beds_filter += f" max: {self.beds_max}"
+            beds_filter += " }"
+            property_filters.append(beds_filter)
+
+        if self.baths_min is not None or self.baths_max is not None:
+            baths_filter = "baths: {"
+            if self.baths_min is not None:
+                baths_filter += f" min: {self.baths_min}"
+            if self.baths_max is not None:
+                baths_filter += f" max: {self.baths_max}"
+            baths_filter += " }"
+            property_filters.append(baths_filter)
+
+        if self.sqft_min is not None or self.sqft_max is not None:
+            sqft_filter = "sqft: {"
+            if self.sqft_min is not None:
+                sqft_filter += f" min: {self.sqft_min}"
+            if self.sqft_max is not None:
+                sqft_filter += f" max: {self.sqft_max}"
+            sqft_filter += " }"
+            property_filters.append(sqft_filter)
+
+        if self.price_min is not None or self.price_max is not None:
+            price_filter = "list_price: {"
+            if self.price_min is not None:
+                price_filter += f" min: {self.price_min}"
+            if self.price_max is not None:
+                price_filter += f" max: {self.price_max}"
+            price_filter += " }"
+            property_filters.append(price_filter)
+
+        if self.lot_sqft_min is not None or self.lot_sqft_max is not None:
+            lot_sqft_filter = "lot_sqft: {"
+            if self.lot_sqft_min is not None:
+                lot_sqft_filter += f" min: {self.lot_sqft_min}"
+            if self.lot_sqft_max is not None:
+                lot_sqft_filter += f" max: {self.lot_sqft_max}"
+            lot_sqft_filter += " }"
+            property_filters.append(lot_sqft_filter)
+
+        if self.year_built_min is not None or self.year_built_max is not None:
+            year_built_filter = "year_built: {"
+            if self.year_built_min is not None:
+                year_built_filter += f" min: {self.year_built_min}"
+            if self.year_built_max is not None:
+                year_built_filter += f" max: {self.year_built_max}"
+            year_built_filter += " }"
+            property_filters.append(year_built_filter)
+
+        property_filters_param = "\n".join(property_filters)
+
+        # Build sort parameter
+        if self.sort_by:
+            sort_param = f"sort: [{{ field: {self.sort_by}, direction: {self.sort_direction} }}]"
+        elif self.listing_type == ListingType.SOLD:
+            sort_param = "sort: [{ field: sold_date, direction: desc }]"
+        else:
+            sort_param = ""  #: prioritize normal fractal sort from realtor
 
         pending_or_contingent_param = (
             "or_filters: { contingent: true, pending: true }" if self.listing_type == ListingType.PENDING else ""
         )
+
+        # Build bucket parameter (only use fractal sort if no custom sort is specified)
+        bucket_param = ""
+        if not self.sort_by:
+            bucket_param = 'bucket: { sort: "fractal_v1.1.3_fr" }'
 
         listing_type = ListingType.FOR_SALE if self.listing_type == ListingType.PENDING else self.listing_type
         is_foreclosure = ""
@@ -187,6 +289,7 @@ class RealtorScraper(Scraper):
                                 %s
                                 %s
                                 %s
+                                %s
                             }
                             %s
                             limit: 200
@@ -197,6 +300,7 @@ class RealtorScraper(Scraper):
                 listing_type.value.lower(),
                 date_param,
                 property_type_param,
+                property_filters_param,
                 pending_or_contingent_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
@@ -220,8 +324,9 @@ class RealtorScraper(Scraper):
                                         %s
                                         %s
                                         %s
+                                        %s
                                     }
-                                    bucket: { sort: "fractal_v1.1.3_fr" }
+                                    %s
                                     %s
                                     limit: 200
                                     offset: $offset
@@ -231,7 +336,9 @@ class RealtorScraper(Scraper):
                 listing_type.value.lower(),
                 date_param,
                 property_type_param,
+                property_filters_param,
                 pending_or_contingent_param,
+                bucket_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
             )
@@ -382,12 +489,110 @@ class RealtorScraper(Scraper):
             for future in as_completed(futures):
                 homes.extend(future.result()["properties"])
 
+        # Apply client-side hour-based filtering if needed
+        # (API only supports day-level filtering, so we post-filter for hour precision)
+        if self.past_hours or self.datetime_from or self.datetime_to:
+            homes = self._apply_hour_based_date_filter(homes)
         # Apply client-side date filtering for PENDING properties
         # (server-side filters are broken in the API)
-        if self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
+        elif self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
             homes = self._apply_pending_date_filter(homes)
-        
+
         return homes
+
+    def _apply_hour_based_date_filter(self, homes):
+        """Apply client-side hour-based date filtering for all listing types.
+
+        This is used when past_hours, datetime_from, or datetime_to are specified,
+        since the API only supports day-level filtering.
+        """
+        if not homes:
+            return homes
+
+        from datetime import datetime, timedelta
+
+        # Determine date range with hour precision
+        date_range = None
+
+        if self.past_hours:
+            cutoff_datetime = datetime.now() - timedelta(hours=self.past_hours)
+            date_range = {'type': 'since', 'date': cutoff_datetime}
+        elif self.datetime_from or self.datetime_to:
+            try:
+                from_datetime = None
+                to_datetime = None
+
+                if self.datetime_from:
+                    from_datetime_str = self.datetime_from.replace('Z', '+00:00') if self.datetime_from.endswith('Z') else self.datetime_from
+                    from_datetime = datetime.fromisoformat(from_datetime_str).replace(tzinfo=None)
+
+                if self.datetime_to:
+                    to_datetime_str = self.datetime_to.replace('Z', '+00:00') if self.datetime_to.endswith('Z') else self.datetime_to
+                    to_datetime = datetime.fromisoformat(to_datetime_str).replace(tzinfo=None)
+
+                if from_datetime and to_datetime:
+                    date_range = {'type': 'range', 'from_date': from_datetime, 'to_date': to_datetime}
+                elif from_datetime:
+                    date_range = {'type': 'since', 'date': from_datetime}
+                elif to_datetime:
+                    date_range = {'type': 'until', 'date': to_datetime}
+            except (ValueError, AttributeError):
+                return homes  # If parsing fails, return unfiltered
+
+        if not date_range:
+            return homes
+
+        # Determine which date field to use based on listing type
+        date_field_name = self._get_date_field_for_listing_type()
+
+        filtered_homes = []
+
+        for home in homes:
+            # Extract the appropriate date for this property
+            property_date = self._extract_date_from_home(home, date_field_name)
+
+            # Handle properties without dates
+            if property_date is None:
+                # For PENDING, include contingent properties without pending_date
+                if self.listing_type == ListingType.PENDING and self._is_contingent(home):
+                    filtered_homes.append(home)
+                continue
+
+            # Check if property date falls within the specified range
+            if self._is_datetime_in_range(property_date, date_range):
+                filtered_homes.append(home)
+
+        return filtered_homes
+
+    def _get_date_field_for_listing_type(self):
+        """Get the appropriate date field name for the current listing type."""
+        if self.listing_type == ListingType.SOLD:
+            return 'last_sold_date'
+        elif self.listing_type == ListingType.PENDING:
+            return 'pending_date'
+        else:  # FOR_SALE or FOR_RENT
+            return 'list_date'
+
+    def _extract_date_from_home(self, home, date_field_name):
+        """Extract a date field from a home (handles both dict and Property object)."""
+        if isinstance(home, dict):
+            date_value = home.get(date_field_name)
+        else:
+            date_value = getattr(home, date_field_name, None)
+
+        if date_value:
+            return self._parse_date_value(date_value)
+        return None
+
+    def _is_datetime_in_range(self, date_obj, date_range):
+        """Check if a datetime object falls within the specified date range (with hour precision)."""
+        if date_range['type'] == 'since':
+            return date_obj >= date_range['date']
+        elif date_range['type'] == 'until':
+            return date_obj <= date_range['date']
+        elif date_range['type'] == 'range':
+            return date_range['from_date'] <= date_obj <= date_range['to_date']
+        return False
 
     def _apply_pending_date_filter(self, homes):
         """Apply client-side date filtering for PENDING properties based on pending_date field.

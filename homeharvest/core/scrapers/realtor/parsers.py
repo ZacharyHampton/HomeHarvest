@@ -250,9 +250,28 @@ def parse_description(result: dict) -> Description | None:
 def calculate_days_on_mls(result: dict) -> Optional[int]:
     """Calculate days on MLS from result data"""
     list_date_str = result.get("list_date")
-    list_date = datetime.strptime(list_date_str.split("T")[0], "%Y-%m-%d") if list_date_str else None
+    list_date = None
+    if list_date_str:
+        try:
+            # Parse full datetime, then use date() for day calculation
+            list_date_str_clean = list_date_str.replace('Z', '+00:00') if list_date_str.endswith('Z') else list_date_str
+            list_date = datetime.fromisoformat(list_date_str_clean).replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            # Fallback for date-only format
+            list_date = datetime.strptime(list_date_str.split("T")[0], "%Y-%m-%d") if "T" in list_date_str else None
+
     last_sold_date_str = result.get("last_sold_date")
-    last_sold_date = datetime.strptime(last_sold_date_str, "%Y-%m-%d") if last_sold_date_str else None
+    last_sold_date = None
+    if last_sold_date_str:
+        try:
+            last_sold_date_str_clean = last_sold_date_str.replace('Z', '+00:00') if last_sold_date_str.endswith('Z') else last_sold_date_str
+            last_sold_date = datetime.fromisoformat(last_sold_date_str_clean).replace(tzinfo=None)
+        except (ValueError, AttributeError):
+            # Fallback for date-only format
+            try:
+                last_sold_date = datetime.strptime(last_sold_date_str, "%Y-%m-%d")
+            except ValueError:
+                last_sold_date = None
     today = datetime.now()
 
     if list_date:

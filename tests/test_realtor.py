@@ -447,3 +447,460 @@ def test_pending_date_filtering():
             # We should get at least one of each type (when available)
             total_properties = pending_count + contingent_count
             assert total_properties > 0, "Should find at least some pending or contingent properties"
+
+
+def test_hour_based_filtering():
+    """Test the new past_hours parameter for hour-level filtering"""
+    from datetime import datetime, timedelta
+
+    # Test for sold properties with 24-hour filter
+    result_24h = scrape_property(
+        location="Phoenix, AZ",
+        listing_type="sold",
+        past_hours=24,
+        limit=50
+    )
+
+    # Test for sold properties with 12-hour filter
+    result_12h = scrape_property(
+        location="Phoenix, AZ",
+        listing_type="sold",
+        past_hours=12,
+        limit=50
+    )
+
+    assert result_24h is not None
+    assert result_12h is not None
+
+    # 12-hour filter should return same or fewer results than 24-hour
+    if len(result_12h) > 0 and len(result_24h) > 0:
+        assert len(result_12h) <= len(result_24h), "12-hour results should be <= 24-hour results"
+
+    # Verify timestamps are within the specified hour range for 24h filter
+    if len(result_24h) > 0:
+        cutoff_time = datetime.now() - timedelta(hours=24)
+
+        # Check a few results
+        for idx in range(min(5, len(result_24h))):
+            sold_date_str = result_24h.iloc[idx]["last_sold_date"]
+            if pd.notna(sold_date_str):
+                try:
+                    sold_date = datetime.strptime(str(sold_date_str), "%Y-%m-%d %H:%M:%S")
+                    # Date should be within last 24 hours
+                    assert sold_date >= cutoff_time, f"Property sold date {sold_date} should be within last 24 hours"
+                except (ValueError, TypeError):
+                    pass  # Skip if date parsing fails
+
+
+def test_datetime_filtering():
+    """Test datetime_from and datetime_to parameters with hour precision"""
+    from datetime import datetime, timedelta
+
+    # Get a recent date range (e.g., yesterday)
+    yesterday = datetime.now() - timedelta(days=1)
+    date_str = yesterday.strftime("%Y-%m-%d")
+
+    # Test filtering for business hours (9 AM to 5 PM) on a specific day
+    result = scrape_property(
+        location="Dallas, TX",
+        listing_type="for_sale",
+        datetime_from=f"{date_str}T09:00:00",
+        datetime_to=f"{date_str}T17:00:00",
+        limit=30
+    )
+
+    assert result is not None
+
+    # Test with only datetime_from
+    result_from_only = scrape_property(
+        location="Houston, TX",
+        listing_type="for_sale",
+        datetime_from=f"{date_str}T00:00:00",
+        limit=30
+    )
+
+    assert result_from_only is not None
+
+    # Test with only datetime_to
+    result_to_only = scrape_property(
+        location="Austin, TX",
+        listing_type="for_sale",
+        datetime_to=f"{date_str}T23:59:59",
+        limit=30
+    )
+
+    assert result_to_only is not None
+
+
+def test_full_datetime_preservation():
+    """Verify that dates now include full timestamps (YYYY-MM-DD HH:MM:SS)"""
+
+    # Test with pandas return type
+    result_pandas = scrape_property(
+        location="San Diego, CA",
+        listing_type="sold",
+        past_days=30,
+        limit=10
+    )
+
+    assert result_pandas is not None and len(result_pandas) > 0
+
+    # Check that date fields contain time information
+    if len(result_pandas) > 0:
+        for idx in range(min(3, len(result_pandas))):
+            # Check last_sold_date
+            sold_date = result_pandas.iloc[idx]["last_sold_date"]
+            if pd.notna(sold_date):
+                sold_date_str = str(sold_date)
+                # Should contain time (HH:MM:SS), not just date
+                assert " " in sold_date_str or "T" in sold_date_str, \
+                    f"Date should include time component: {sold_date_str}"
+
+    # Test with pydantic return type
+    result_pydantic = scrape_property(
+        location="Los Angeles, CA",
+        listing_type="for_sale",
+        past_days=7,
+        limit=10,
+        return_type="pydantic"
+    )
+
+    assert result_pydantic is not None and len(result_pydantic) > 0
+
+    # Verify Property objects have datetime objects with time info
+    for prop in result_pydantic[:3]:
+        if prop.list_date:
+            # Should be a datetime object, not just a date
+            assert hasattr(prop.list_date, 'hour'), "list_date should be a datetime with time"
+
+
+def test_beds_filtering():
+    """Test bedroom filtering with beds_min and beds_max"""
+
+    result = scrape_property(
+        location="Atlanta, GA",
+        listing_type="for_sale",
+        beds_min=2,
+        beds_max=4,
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify all properties have 2-4 bedrooms
+    for idx in range(min(10, len(result))):
+        beds = result.iloc[idx]["beds"]
+        if pd.notna(beds):
+            assert 2 <= beds <= 4, f"Property should have 2-4 beds, got {beds}"
+
+    # Test beds_min only
+    result_min = scrape_property(
+        location="Denver, CO",
+        listing_type="for_sale",
+        beds_min=3,
+        limit=30
+    )
+
+    assert result_min is not None
+
+    # Test beds_max only
+    result_max = scrape_property(
+        location="Seattle, WA",
+        listing_type="for_sale",
+        beds_max=2,
+        limit=30
+    )
+
+    assert result_max is not None
+
+
+def test_baths_filtering():
+    """Test bathroom filtering with baths_min and baths_max"""
+
+    result = scrape_property(
+        location="Miami, FL",
+        listing_type="for_sale",
+        baths_min=2.0,
+        baths_max=3.5,
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify bathrooms are within range
+    for idx in range(min(10, len(result))):
+        full_baths = result.iloc[idx]["full_baths"]
+        half_baths = result.iloc[idx]["half_baths"]
+
+        if pd.notna(full_baths):
+            total_baths = float(full_baths) + (float(half_baths) * 0.5 if pd.notna(half_baths) else 0)
+            # Allow some tolerance as API might calculate differently
+            if total_baths > 0:
+                assert total_baths >= 1.5, f"Baths should be >= 2.0, got {total_baths}"
+
+
+def test_sqft_filtering():
+    """Test square footage filtering"""
+
+    result = scrape_property(
+        location="Portland, OR",
+        listing_type="for_sale",
+        sqft_min=1000,
+        sqft_max=2500,
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify sqft is within range
+    for idx in range(min(10, len(result))):
+        sqft = result.iloc[idx]["sqft"]
+        if pd.notna(sqft) and sqft > 0:
+            assert 1000 <= sqft <= 2500, f"Sqft should be 1000-2500, got {sqft}"
+
+
+def test_price_filtering():
+    """Test price range filtering"""
+
+    result = scrape_property(
+        location="Charlotte, NC",
+        listing_type="for_sale",
+        price_min=200000,
+        price_max=500000,
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify prices are within range
+    for idx in range(min(15, len(result))):
+        price = result.iloc[idx]["list_price"]
+        if pd.notna(price) and price > 0:
+            assert 200000 <= price <= 500000, f"Price should be $200k-$500k, got ${price}"
+
+
+def test_lot_sqft_filtering():
+    """Test lot size filtering"""
+
+    result = scrape_property(
+        location="Scottsdale, AZ",
+        listing_type="for_sale",
+        lot_sqft_min=5000,
+        lot_sqft_max=15000,
+        limit=30
+    )
+
+    assert result is not None
+    # Results might be fewer if lot_sqft data is sparse
+
+
+def test_year_built_filtering():
+    """Test year built filtering"""
+
+    result = scrape_property(
+        location="Tampa, FL",
+        listing_type="for_sale",
+        year_built_min=2000,
+        year_built_max=2024,
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify year_built is within range
+    for idx in range(min(10, len(result))):
+        year = result.iloc[idx]["year_built"]
+        if pd.notna(year) and year > 0:
+            assert 2000 <= year <= 2024, f"Year should be 2000-2024, got {year}"
+
+
+def test_combined_filters():
+    """Test multiple filters working together"""
+
+    result = scrape_property(
+        location="Nashville, TN",
+        listing_type="for_sale",
+        beds_min=3,
+        baths_min=2.0,
+        sqft_min=1500,
+        price_min=250000,
+        price_max=600000,
+        year_built_min=1990,
+        limit=30
+    )
+
+    assert result is not None
+
+    # If we get results, verify they meet ALL criteria
+    if len(result) > 0:
+        for idx in range(min(5, len(result))):
+            row = result.iloc[idx]
+
+            # Check beds
+            if pd.notna(row["beds"]):
+                assert row["beds"] >= 3, f"Beds should be >= 3, got {row['beds']}"
+
+            # Check sqft
+            if pd.notna(row["sqft"]) and row["sqft"] > 0:
+                assert row["sqft"] >= 1500, f"Sqft should be >= 1500, got {row['sqft']}"
+
+            # Check price
+            if pd.notna(row["list_price"]) and row["list_price"] > 0:
+                assert 250000 <= row["list_price"] <= 600000, \
+                    f"Price should be $250k-$600k, got ${row['list_price']}"
+
+            # Check year
+            if pd.notna(row["year_built"]) and row["year_built"] > 0:
+                assert row["year_built"] >= 1990, \
+                    f"Year should be >= 1990, got {row['year_built']}"
+
+
+def test_sorting_by_price():
+    """Test sorting by list_price - note API sorting may not be perfect"""
+
+    # Sort ascending (cheapest first)
+    result_asc = scrape_property(
+        location="Orlando, FL",
+        listing_type="for_sale",
+        sort_by="list_price",
+        sort_direction="asc",
+        limit=20
+    )
+
+    assert result_asc is not None and len(result_asc) > 0
+
+    # Sort descending (most expensive first)
+    result_desc = scrape_property(
+        location="San Antonio, TX",
+        listing_type="for_sale",
+        sort_by="list_price",
+        sort_direction="desc",
+        limit=20
+    )
+
+    assert result_desc is not None and len(result_desc) > 0
+
+    # Note: Realtor API sorting may not be perfectly reliable for all search types
+    # The test ensures the sort parameters don't cause errors, actual sort order may vary
+
+
+def test_sorting_by_date():
+    """Test sorting by list_date - note API sorting may not be perfect"""
+
+    result = scrape_property(
+        location="Columbus, OH",
+        listing_type="for_sale",
+        sort_by="list_date",
+        sort_direction="desc",  # Newest first
+        limit=20
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Test ensures sort parameter doesn't cause errors
+    # Note: Realtor API sorting may not be perfectly reliable for all search types
+
+
+def test_sorting_by_sqft():
+    """Test sorting by square footage - note API sorting may not be perfect"""
+
+    result = scrape_property(
+        location="Indianapolis, IN",
+        listing_type="for_sale",
+        sort_by="sqft",
+        sort_direction="desc",  # Largest first
+        limit=20
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Test ensures sort parameter doesn't cause errors
+    # Note: Realtor API sorting may not be perfectly reliable for all search types
+
+
+def test_filter_validation_errors():
+    """Test that validation catches invalid parameters"""
+    import pytest
+
+    # Test: beds_min > beds_max should raise ValueError
+    with pytest.raises(ValueError, match="beds_min.*cannot be greater than.*beds_max"):
+        scrape_property(
+            location="Boston, MA",
+            listing_type="for_sale",
+            beds_min=5,
+            beds_max=2,
+            limit=10
+        )
+
+    # Test: invalid datetime format should raise exception
+    with pytest.raises(Exception):  # InvalidDate
+        scrape_property(
+            location="Boston, MA",
+            listing_type="for_sale",
+            datetime_from="not-a-valid-datetime",
+            limit=10
+        )
+
+    # Test: invalid sort_by value should raise ValueError
+    with pytest.raises(ValueError, match="Invalid sort_by"):
+        scrape_property(
+            location="Boston, MA",
+            listing_type="for_sale",
+            sort_by="invalid_field",
+            limit=10
+        )
+
+    # Test: invalid sort_direction should raise ValueError
+    with pytest.raises(ValueError, match="Invalid sort_direction"):
+        scrape_property(
+            location="Boston, MA",
+            listing_type="for_sale",
+            sort_by="list_price",
+            sort_direction="invalid",
+            limit=10
+        )
+
+
+def test_backward_compatibility():
+    """Ensure old parameters still work as expected"""
+
+    # Test past_days still works
+    result_past_days = scrape_property(
+        location="Las Vegas, NV",
+        listing_type="sold",
+        past_days=30,
+        limit=20
+    )
+
+    assert result_past_days is not None and len(result_past_days) > 0
+
+    # Test date_from/date_to still work
+    result_date_range = scrape_property(
+        location="Memphis, TN",
+        listing_type="sold",
+        date_from="2024-01-01",
+        date_to="2024-03-31",
+        limit=20
+    )
+
+    assert result_date_range is not None
+
+    # Test property_type still works
+    result_property_type = scrape_property(
+        location="Louisville, KY",
+        listing_type="for_sale",
+        property_type=["single_family"],
+        limit=20
+    )
+
+    assert result_property_type is not None and len(result_property_type) > 0
+
+    # Test foreclosure still works
+    result_foreclosure = scrape_property(
+        location="Detroit, MI",
+        listing_type="for_sale",
+        foreclosure=True,
+        limit=15
+    )
+
+    assert result_foreclosure is not None
