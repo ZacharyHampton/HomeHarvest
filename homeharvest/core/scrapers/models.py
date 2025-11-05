@@ -192,6 +192,7 @@ class Property(BaseModel):
     list_date: datetime | None = Field(None, description="The time this Home entered Move system")
     pending_date: datetime | None = Field(None, description="The date listing went into pending state")
     last_sold_date: datetime | None = Field(None, description="Last time the Home was sold")
+    last_status_change_date: datetime | None = Field(None, description="Last time the status of the listing changed")
     prc_sqft: int | None = None
     new_construction: bool | None = Field(None, description="Search for new construction homes")
     hoa_fee: int | None = Field(None, description="Search for homes where HOA fee is known and falls within specified range")

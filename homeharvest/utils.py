@@ -36,6 +36,7 @@ ordered_properties = [
     "sold_price",
     "last_sold_date",
     "last_sold_price",
+    "last_status_change_date",
     "assessed_value",
     "estimated_value",
     "tax",
@@ -120,7 +121,7 @@ def process_result(result: Property) -> pd.DataFrame:
     prop_data["nearby_schools"] = ", ".join(set(prop_data["nearby_schools"])) if prop_data["nearby_schools"] else None
     
     # Convert datetime objects to strings for CSV (preserve full datetime including time)
-    for date_field in ["list_date", "pending_date", "last_sold_date"]:
+    for date_field in ["list_date", "pending_date", "last_sold_date", "last_status_change_date"]:
         if prop_data.get(date_field):
             prop_data[date_field] = prop_data[date_field].strftime("%Y-%m-%d %H:%M:%S") if hasattr(prop_data[date_field], 'strftime') else prop_data[date_field]
     

@@ -574,7 +574,11 @@ class RealtorScraper(Scraper):
             return 'list_date'
 
     def _extract_date_from_home(self, home, date_field_name):
-        """Extract a date field from a home (handles both dict and Property object)."""
+        """Extract a date field from a home (handles both dict and Property object).
+
+        Falls back to last_status_change_date if the primary date field is not available,
+        providing more precise filtering for PENDING/SOLD properties.
+        """
         if isinstance(home, dict):
             date_value = home.get(date_field_name)
         else:
@@ -582,6 +586,17 @@ class RealtorScraper(Scraper):
 
         if date_value:
             return self._parse_date_value(date_value)
+
+        # Fallback to last_status_change_date if primary date field is missing
+        # This is useful for PENDING/SOLD properties where the specific date might be unavailable
+        if isinstance(home, dict):
+            fallback_date = home.get('last_status_change_date')
+        else:
+            fallback_date = getattr(home, 'last_status_change_date', None)
+
+        if fallback_date:
+            return self._parse_date_value(fallback_date)
+
         return None
 
     def _is_datetime_in_range(self, date_obj, date_range):

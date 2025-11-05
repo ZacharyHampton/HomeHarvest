@@ -125,6 +125,7 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
         prc_sqft=result.get("price_per_sqft"),
         last_sold_date=(datetime.fromisoformat(result["last_sold_date"].replace('Z', '+00:00') if result["last_sold_date"].endswith('Z') else result["last_sold_date"]) if result.get("last_sold_date") else None),
         pending_date=(datetime.fromisoformat(result["pending_date"].replace('Z', '+00:00') if result["pending_date"].endswith('Z') else result["pending_date"]) if result.get("pending_date") else None),
+        last_status_change_date=(datetime.fromisoformat(result["last_status_change_date"].replace('Z', '+00:00') if result["last_status_change_date"].endswith('Z') else result["last_status_change_date"]) if result.get("last_status_change_date") else None),
         new_construction=result["flags"].get("is_new_construction") is True,
         hoa_fee=(result["hoa"]["fee"] if result.get("hoa") and isinstance(result["hoa"], dict) else None),
         latitude=(result["location"]["address"]["coordinate"].get("lat") if able_to_get_lat_long else None),
@@ -162,6 +163,25 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
         photos=result.get("photos"),
         flags=result.get("flags"),
     )
+
+    # Enhance date precision using last_status_change_date
+    # pending_date and last_sold_date only have day-level precision
+    # last_status_change_date has hour-level precision
+    if realty_property.last_status_change_date:
+        status = realty_property.status.upper() if realty_property.status else None
+
+        # For PENDING/CONTINGENT properties, use last_status_change_date for hour-precision on pending_date
+        if status in ["PENDING", "CONTINGENT"] and realty_property.pending_date:
+            # Only replace if dates are on the same day
+            if realty_property.pending_date.date() == realty_property.last_status_change_date.date():
+                realty_property.pending_date = realty_property.last_status_change_date
+
+        # For SOLD properties, use last_status_change_date for hour-precision on last_sold_date
+        elif status == "SOLD" and realty_property.last_sold_date:
+            # Only replace if dates are on the same day
+            if realty_property.last_sold_date.date() == realty_property.last_status_change_date.date():
+                realty_property.last_sold_date = realty_property.last_status_change_date
+
     return realty_property
 
 

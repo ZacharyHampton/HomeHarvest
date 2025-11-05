@@ -324,6 +324,7 @@ Property
 │ ├── pending_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── sold_price
 │ ├── last_sold_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
+│ ├── last_status_change_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── last_sold_price
 │ ├── price_per_sqft
 │ ├── new_construction
