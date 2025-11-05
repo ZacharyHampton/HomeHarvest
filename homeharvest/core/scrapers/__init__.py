@@ -25,6 +25,7 @@ class ScraperInput(BaseModel):
     extra_property_data: bool | None = True
     exclude_pending: bool | None = False
     limit: int = 10000
+    offset: int = 0
     return_type: ReturnType = ReturnType.pandas
 
     # New date/time filtering parameters
@@ -106,6 +107,7 @@ class Scraper:
         self.extra_property_data = scraper_input.extra_property_data
         self.exclude_pending = scraper_input.exclude_pending
         self.limit = scraper_input.limit
+        self.offset = scraper_input.offset
         self.return_type = scraper_input.return_type
 
         # New date/time filtering

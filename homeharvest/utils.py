@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pandas as pd
+import warnings
 from datetime import datetime
 from .core.scrapers.models import Property, ListingType, Advertisers
 from .exceptions import InvalidListingType, InvalidDate
@@ -180,6 +181,36 @@ def validate_limit(limit: int) -> None:
 
     if limit is not None and (limit < 1 or limit > 10000):
         raise ValueError("Property limit must be between 1 and 10,000.")
+
+
+def validate_offset(offset: int, limit: int = 10000) -> None:
+    """Validate offset parameter for pagination.
+
+    Args:
+        offset: Starting position for results pagination
+        limit: Maximum number of results to fetch
+
+    Raises:
+        ValueError: If offset is invalid or if offset + limit exceeds API limit
+    """
+    if offset is not None and offset < 0:
+        raise ValueError("Offset must be non-negative (>= 0).")
+
+    # Check if offset + limit exceeds API's hard limit of 10,000
+    if offset is not None and limit is not None and (offset + limit) > 10000:
+        raise ValueError(
+            f"offset ({offset}) + limit ({limit}) = {offset + limit} exceeds API maximum of 10,000. "
+            f"The API cannot return results beyond position 10,000. "
+            f"To fetch more results, narrow your search."
+        )
+
+    # Warn if offset is not a multiple of 200 (API page size)
+    if offset is not None and offset > 0 and offset % 200 != 0:
+        warnings.warn(
+            f"Offset should be a multiple of 200 (page size) for optimal performance. "
+            f"Using offset {offset} may result in less efficient pagination.",
+            UserWarning
+        )
 
 
 def validate_datetime(datetime_str: str | None) -> None:

@@ -870,18 +870,23 @@ def test_combined_filters():
 
 
 def test_sorting_by_price():
-    """Test sorting by list_price - note API sorting may not be perfect"""
+    """Test sorting by list_price with actual sort order validation"""
 
-    # Sort ascending (cheapest first)
+    # Sort ascending (cheapest first) with multi-page limit to test concatenation
     result_asc = scrape_property(
         location="Orlando, FL",
         listing_type="for_sale",
         sort_by="list_price",
         sort_direction="asc",
-        limit=20
+        limit=250  # Multi-page to test concatenation logic
     )
 
     assert result_asc is not None and len(result_asc) > 0
+
+    # Verify ascending sort order (allow for None/NA values at the end)
+    prices_asc = result_asc["list_price"].dropna().tolist()
+    assert len(prices_asc) > 0, "No properties with prices found"
+    assert prices_asc == sorted(prices_asc), f"Prices not in ascending order: {prices_asc[:10]}"
 
     # Sort descending (most expensive first)
     result_desc = scrape_property(
@@ -889,47 +894,87 @@ def test_sorting_by_price():
         listing_type="for_sale",
         sort_by="list_price",
         sort_direction="desc",
-        limit=20
+        limit=250  # Multi-page to test concatenation logic
     )
 
     assert result_desc is not None and len(result_desc) > 0
 
-    # Note: Realtor API sorting may not be perfectly reliable for all search types
-    # The test ensures the sort parameters don't cause errors, actual sort order may vary
+    # Verify descending sort order (allow for None/NA values at the end)
+    prices_desc = result_desc["list_price"].dropna().tolist()
+    assert len(prices_desc) > 0, "No properties with prices found"
+    assert prices_desc == sorted(prices_desc, reverse=True), f"Prices not in descending order: {prices_desc[:10]}"
 
 
 def test_sorting_by_date():
-    """Test sorting by list_date - note API sorting may not be perfect"""
+    """Test sorting by list_date with actual sort order validation"""
 
-    result = scrape_property(
+    # Test descending (newest first) with multi-page limit
+    result_desc = scrape_property(
         location="Columbus, OH",
         listing_type="for_sale",
         sort_by="list_date",
         sort_direction="desc",  # Newest first
-        limit=20
+        limit=250  # Multi-page to test concatenation logic
     )
 
-    assert result is not None and len(result) > 0
+    assert result_desc is not None and len(result_desc) > 0
 
-    # Test ensures sort parameter doesn't cause errors
-    # Note: Realtor API sorting may not be perfectly reliable for all search types
+    # Verify descending sort order (allow for None/NA values at the end)
+    dates_desc = result_desc["list_date"].dropna().tolist()
+    assert len(dates_desc) > 0, "No properties with dates found"
+    assert dates_desc == sorted(dates_desc, reverse=True), f"Dates not in descending order (newest first): {dates_desc[:10]}"
+
+    # Test ascending (oldest first)
+    result_asc = scrape_property(
+        location="Columbus, OH",
+        listing_type="for_sale",
+        sort_by="list_date",
+        sort_direction="asc",  # Oldest first
+        limit=250
+    )
+
+    assert result_asc is not None and len(result_asc) > 0
+
+    # Verify ascending sort order
+    dates_asc = result_asc["list_date"].dropna().tolist()
+    assert len(dates_asc) > 0, "No properties with dates found"
+    assert dates_asc == sorted(dates_asc), f"Dates not in ascending order (oldest first): {dates_asc[:10]}"
 
 
 def test_sorting_by_sqft():
-    """Test sorting by square footage - note API sorting may not be perfect"""
+    """Test sorting by square footage with actual sort order validation"""
 
-    result = scrape_property(
+    # Test descending (largest first) with multi-page limit
+    result_desc = scrape_property(
         location="Indianapolis, IN",
         listing_type="for_sale",
         sort_by="sqft",
         sort_direction="desc",  # Largest first
-        limit=20
+        limit=250  # Multi-page to test concatenation logic
     )
 
-    assert result is not None and len(result) > 0
+    assert result_desc is not None and len(result_desc) > 0
 
-    # Test ensures sort parameter doesn't cause errors
-    # Note: Realtor API sorting may not be perfectly reliable for all search types
+    # Verify descending sort order (allow for None/NA values at the end)
+    sqfts_desc = result_desc["sqft"].dropna().tolist()
+    assert len(sqfts_desc) > 0, "No properties with sqft found"
+    assert sqfts_desc == sorted(sqfts_desc, reverse=True), f"Square footages not in descending order: {sqfts_desc[:10]}"
+
+    # Test ascending (smallest first)
+    result_asc = scrape_property(
+        location="Indianapolis, IN",
+        listing_type="for_sale",
+        sort_by="sqft",
+        sort_direction="asc",  # Smallest first
+        limit=250
+    )
+
+    assert result_asc is not None and len(result_asc) > 0
+
+    # Verify ascending sort order
+    sqfts_asc = result_asc["sqft"].dropna().tolist()
+    assert len(sqfts_asc) > 0, "No properties with sqft found"
+    assert sqfts_asc == sorted(sqfts_asc), f"Square footages not in ascending order: {sqfts_asc[:10]}"
 
 
 def test_filter_validation_errors():

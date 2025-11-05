@@ -278,7 +278,9 @@ Optional
 │
 ├── exclude_pending (True/False): If set, excludes 'pending' properties from the 'for_sale' results unless listing_type is 'pending'
 │
-└── limit (integer): Limit the number of properties to fetch. Max & default is 10000.
+├── limit (integer): Limit the number of properties to fetch. Max & default is 10000.
+│
+└── offset (integer): Starting position for pagination within the 10k limit. Use with limit to fetch results in chunks.
 ```
 
 ### Property Schema

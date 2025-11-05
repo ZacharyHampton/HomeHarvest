@@ -1,7 +1,7 @@
 import warnings
 import pandas as pd
 from .core.scrapers import ScraperInput
-from .utils import process_result, ordered_properties, validate_input, validate_dates, validate_limit, validate_datetime, validate_filters, validate_sort
+from .utils import process_result, ordered_properties, validate_input, validate_dates, validate_limit, validate_offset, validate_datetime, validate_filters, validate_sort
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
 from typing import Union, Optional, List
@@ -21,6 +21,7 @@ def scrape_property(
     extra_property_data: bool = True,
     exclude_pending: bool = False,
     limit: int = 10000,
+    offset: int = 0,
     # New date/time filtering parameters
     past_hours: int = None,
     datetime_from: str = None,
@@ -61,6 +62,7 @@ def scrape_property(
     :param extra_property_data: Increases requests by O(n). If set, this fetches additional property data (e.g. agent, broker, property evaluations etc.)
     :param exclude_pending: If true, this excludes pending or contingent properties from the results, unless listing type is pending.
     :param limit: Limit the number of results returned. Maximum is 10,000.
+    :param offset: Starting position for pagination within the 10k limit (offset + limit cannot exceed 10,000). Use with limit to fetch results in chunks (e.g., offset=200, limit=200 fetches results 200-399). Should be a multiple of 200 (page size) for optimal performance. Default is 0. Note: Cannot be used to bypass the 10k API limit - use date ranges (date_from/date_to) to narrow searches and fetch more data.
 
     New parameters:
     :param past_hours: Get properties in the last _ hours (requires client-side filtering)
@@ -77,6 +79,7 @@ def scrape_property(
     validate_input(listing_type)
     validate_dates(date_from, date_to)
     validate_limit(limit)
+    validate_offset(offset, limit)
     validate_datetime(datetime_from)
     validate_datetime(datetime_to)
     validate_filters(
@@ -100,6 +103,7 @@ def scrape_property(
         extra_property_data=extra_property_data,
         exclude_pending=exclude_pending,
         limit=limit,
+        offset=offset,
         # New date/time filtering
         past_hours=past_hours,
         datetime_from=datetime_from,

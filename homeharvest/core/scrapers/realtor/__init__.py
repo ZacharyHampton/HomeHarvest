@@ -405,13 +405,23 @@ class RealtorScraper(Scraper):
 
         if self.return_type != ReturnType.raw:
             with ThreadPoolExecutor(max_workers=self.NUM_PROPERTY_WORKERS) as executor:
-                futures = [executor.submit(process_property, result, self.mls_only, self.extra_property_data, 
-                                         self.exclude_pending, self.listing_type, get_key, process_extra_property_details) for result in properties_list]
+                # Store futures with their indices to maintain sort order
+                futures_with_indices = [
+                    (i, executor.submit(process_property, result, self.mls_only, self.extra_property_data,
+                                       self.exclude_pending, self.listing_type, get_key, process_extra_property_details))
+                    for i, result in enumerate(properties_list)
+                ]
 
-                for future in as_completed(futures):
+                # Collect results and sort by index to preserve API sort order
+                results = []
+                for idx, future in futures_with_indices:
                     result = future.result()
                     if result:
-                        properties.append(result)
+                        results.append((idx, result))
+
+                # Sort by index and extract properties in correct order
+                results.sort(key=lambda x: x[0])
+                properties = [result for idx, result in results]
         else:
             properties = properties_list
 
@@ -428,7 +438,7 @@ class RealtorScraper(Scraper):
         location_type = location_info["area_type"]
 
         search_variables = {
-            "offset": 0,
+            "offset": self.offset,
         }
 
         search_type = (
@@ -473,21 +483,30 @@ class RealtorScraper(Scraper):
         homes = result["properties"]
 
         with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(
+            # Store futures with their offsets to maintain proper sort order
+            # Start from offset + page_size and go up to offset + limit
+            futures_with_offsets = [
+                (i, executor.submit(
                     self.general_search,
                     variables=search_variables | {"offset": i},
                     search_type=search_type,
-                )
+                ))
                 for i in range(
-                    self.DEFAULT_PAGE_SIZE,
-                    min(total, self.limit),
+                    self.offset + self.DEFAULT_PAGE_SIZE,
+                    min(total, self.offset + self.limit),
                     self.DEFAULT_PAGE_SIZE,
                 )
             ]
 
-            for future in as_completed(futures):
-                homes.extend(future.result()["properties"])
+            # Collect results and sort by offset to preserve API sort order across pages
+            results = []
+            for offset, future in futures_with_offsets:
+                results.append((offset, future.result()["properties"]))
+
+            # Sort by offset and concatenate in correct order
+            results.sort(key=lambda x: x[0])
+            for offset, properties in results:
+                homes.extend(properties)
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)
@@ -497,6 +516,11 @@ class RealtorScraper(Scraper):
         # (server-side filters are broken in the API)
         elif self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
             homes = self._apply_pending_date_filter(homes)
+
+        # Apply client-side sort to ensure results are properly ordered
+        # This is necessary after filtering and to guarantee sort order across page boundaries
+        if self.sort_by:
+            homes = self._apply_sort(homes)
 
         return homes
 
@@ -721,6 +745,60 @@ class RealtorScraper(Scraper):
         elif date_range['type'] == 'range':
             return date_range['from_date'] <= date_obj <= date_range['to_date']
         return False
+
+    def _apply_sort(self, homes):
+        """Apply client-side sorting to ensure results are properly ordered.
+
+        This is necessary because:
+        1. Multi-page results need to be re-sorted after concatenation
+        2. Filtering operations may disrupt the original sort order
+
+        Args:
+            homes: List of properties (either dicts or Property objects)
+
+        Returns:
+            Sorted list of properties
+        """
+        if not homes or not self.sort_by:
+            return homes
+
+        def get_sort_key(home):
+            """Extract the sort field value from a home (handles both dict and Property object)."""
+            if isinstance(home, dict):
+                value = home.get(self.sort_by)
+            else:
+                # Property object
+                value = getattr(home, self.sort_by, None)
+
+            # Handle None values - push them to the end
+            if value is None:
+                # Use a sentinel value that sorts to the end
+                return (1, 0) if self.sort_direction == "desc" else (1, float('inf'))
+
+            # For datetime fields, convert string to datetime for proper sorting
+            if self.sort_by in ['list_date', 'sold_date', 'pending_date']:
+                if isinstance(value, str):
+                    try:
+                        from datetime import datetime
+                        # Handle timezone indicators
+                        date_value = value
+                        if date_value.endswith('Z'):
+                            date_value = date_value[:-1] + '+00:00'
+                        parsed_date = datetime.fromisoformat(date_value)
+                        return (0, parsed_date)
+                    except (ValueError, AttributeError):
+                        # If parsing fails, treat as None
+                        return (1, 0) if self.sort_direction == "desc" else (1, float('inf'))
+                return (0, value)
+
+            # For numeric fields, ensure we can compare
+            return (0, value)
+
+        # Sort the homes
+        reverse = (self.sort_direction == "desc")
+        sorted_homes = sorted(homes, key=get_sort_key, reverse=reverse)
+
+        return sorted_homes
 
 
 
