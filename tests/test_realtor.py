@@ -1270,3 +1270,83 @@ def test_last_status_change_date_hour_filtering():
                         f"PENDING property pending_date {pending_date} should be within 48 hours of {cutoff_time}"
                 except (ValueError, TypeError):
                     pass  # Skip if parsing fails
+
+
+def test_exclude_pending_with_raw_data():
+    """Test that exclude_pending parameter works correctly with return_type='raw'"""
+
+    # Query for sale properties with exclude_pending=True and raw data
+    result = scrape_property(
+        location="Phoenix, AZ",
+        listing_type="for_sale",
+        exclude_pending=True,
+        return_type="raw",
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify that no pending or contingent properties are in the results
+    for prop in result:
+        flags = prop.get('flags', {})
+        is_pending = flags.get('is_pending', False)
+        is_contingent = flags.get('is_contingent', False)
+
+        assert not is_pending, f"Property {prop.get('property_id')} should not be pending when exclude_pending=True"
+        assert not is_contingent, f"Property {prop.get('property_id')} should not be contingent when exclude_pending=True"
+
+
+def test_mls_only_with_raw_data():
+    """Test that mls_only parameter works correctly with return_type='raw'"""
+
+    # Query with mls_only=True and raw data
+    result = scrape_property(
+        location="Dallas, TX",
+        listing_type="for_sale",
+        mls_only=True,
+        return_type="raw",
+        limit=50
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify that all properties have MLS IDs (stored in source.id)
+    for prop in result:
+        source = prop.get('source', {})
+        mls_id = source.get('id') if source else None
+
+        assert mls_id is not None and mls_id != "", \
+            f"Property {prop.get('property_id')} should have an MLS ID (source.id) when mls_only=True, got: {mls_id}"
+
+
+def test_combined_filters_with_raw_data():
+    """Test that both exclude_pending and mls_only work together with return_type='raw'"""
+
+    # Query with both filters enabled and raw data
+    result = scrape_property(
+        location="Austin, TX",
+        listing_type="for_sale",
+        exclude_pending=True,
+        mls_only=True,
+        return_type="raw",
+        limit=30
+    )
+
+    assert result is not None and len(result) > 0
+
+    # Verify both filters are applied
+    for prop in result:
+        # Check exclude_pending filter
+        flags = prop.get('flags', {})
+        is_pending = flags.get('is_pending', False)
+        is_contingent = flags.get('is_contingent', False)
+
+        assert not is_pending, f"Property {prop.get('property_id')} should not be pending"
+        assert not is_contingent, f"Property {prop.get('property_id')} should not be contingent"
+
+        # Check mls_only filter
+        source = prop.get('source', {})
+        mls_id = source.get('id') if source else None
+
+        assert mls_id is not None and mls_id != "", \
+            f"Property {prop.get('property_id')} should have an MLS ID (source.id)"

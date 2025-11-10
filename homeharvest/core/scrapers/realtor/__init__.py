@@ -522,6 +522,11 @@ class RealtorScraper(Scraper):
         if self.sort_by:
             homes = self._apply_sort(homes)
 
+        # Apply raw data filters (exclude_pending and mls_only) for raw return type
+        # These filters are normally applied in process_property() but are bypassed for raw data
+        if self.return_type == ReturnType.raw:
+            homes = self._apply_raw_data_filters(homes)
+
         return homes
 
     def _apply_hour_based_date_filter(self, homes):
@@ -800,6 +805,47 @@ class RealtorScraper(Scraper):
 
         return sorted_homes
 
+    def _apply_raw_data_filters(self, homes):
+        """Apply exclude_pending and mls_only filters for raw data returns.
+
+        These filters are normally applied in process_property(), but that function
+        is bypassed when return_type="raw", so we need to apply them here instead.
+
+        Args:
+            homes: List of properties (either dicts or Property objects)
+
+        Returns:
+            Filtered list of properties
+        """
+        if not homes:
+            return homes
+
+        # Only filter raw data (dict objects)
+        # Property objects have already been filtered in process_property()
+        if homes and not isinstance(homes[0], dict):
+            return homes
+
+        filtered_homes = []
+
+        for home in homes:
+            # Apply exclude_pending filter
+            if self.exclude_pending and self.listing_type != ListingType.PENDING:
+                flags = home.get('flags', {})
+                is_pending = flags.get('is_pending', False)
+                is_contingent = flags.get('is_contingent', False)
+
+                if is_pending or is_contingent:
+                    continue  # Skip this property
+
+            # Apply mls_only filter
+            if self.mls_only:
+                source = home.get('source', {})
+                if not source or not source.get('id'):
+                    continue  # Skip this property
+
+            filtered_homes.append(home)
+
+        return filtered_homes
 
 
     @retry(
