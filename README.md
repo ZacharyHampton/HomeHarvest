@@ -7,9 +7,13 @@
 
 ## HomeHarvest Features
 
-- **Source**: Fetches properties directly from **Realtor.com**.
-- **Data Format**: Structures data to resemble MLS listings.
-- **Export Flexibility**: Options to save as either CSV or Excel.
+- **Source**: Fetches properties directly from **Realtor.com**
+- **Data Format**: Structures data to resemble MLS listings
+- **Export Options**: Save as CSV, Excel, or return as Pandas/Pydantic/Raw
+- **Flexible Filtering**: Filter by beds, baths, price, sqft, lot size, year built
+- **Time-Based Queries**: Search by hours, days, or specific date ranges
+- **Multiple Listing Types**: Query for_sale, for_rent, sold, pending, or all at once
+- **Sorting**: Sort results by price, date, size, or last update
 
 ![homeharvest](https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/b3d5d727-e67b-4a9f-85d8-1e65fd18620a)
 
@@ -26,134 +30,67 @@ pip install -U homeharvest
 
 ```py
 from homeharvest import scrape_property
-from datetime import datetime
-
-# Generate filename based on current timestamp
-current_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-filename = f"HomeHarvest_{current_timestamp}.csv"
 
 properties = scrape_property(
-  location="San Diego, CA",
-  listing_type="sold",  # or (for_sale, for_rent, pending)
-  past_days=30,  # sold in last 30 days - listed in last 30 days if (for_sale, for_rent)
-
-  # property_type=['single_family','multi_family'],
-  # date_from="2023-05-01", # alternative to past_days
-  # date_to="2023-05-28",
-  # foreclosure=True
-  # mls_only=True,  # only fetch MLS listings
+    location="San Diego, CA",
+    listing_type="sold",  # for_sale, for_rent, pending
+    past_days=30
 )
-print(f"Number of properties: {len(properties)}")
 
-# Export to csv
-properties.to_csv(filename, index=False)
-print(properties.head())
+properties.to_csv("results.csv", index=False)
+print(f"Found {len(properties)} properties")
 ```
 
 ### Flexible Location Formats
 ```py
-# HomeHarvest supports any of these location formats:
-properties = scrape_property(location="92104")  # Just zip code
-properties = scrape_property(location="San Diego")  # Just city  
-properties = scrape_property(location="San Diego, CA")  # City, state
-properties = scrape_property(location="San Diego, California")  # Full state name
-properties = scrape_property(location="1234 Main St, San Diego, CA 92104")  # Full address
-
-# You can also search for properties within a radius of a specific address
+# Accepts: zip code, city, "city, state", full address, etc.
 properties = scrape_property(
-    location="1234 Main St, San Diego, CA 92104",
-    radius=5.0  # 5 mile radius
+    location="San Diego, CA",  # or "92104", "San Diego", "1234 Main St, San Diego, CA 92104"
+    radius=5.0  # Optional: search within radius (miles) of address
 )
 ```
 
 ### Advanced Filtering Examples
 
-#### Hour-Based Filtering
+#### Time-Based Filtering
 ```py
-# Get properties listed in the last 24 hours
+from datetime import datetime, timedelta
+
+# Filter by hours or use datetime/timedelta objects
 properties = scrape_property(
     location="Austin, TX",
     listing_type="for_sale",
-    past_hours=24
-)
-
-# Get properties listed during specific hours (e.g., business hours)
-properties = scrape_property(
-    location="Dallas, TX",
-    listing_type="for_sale",
-    datetime_from="2025-01-20T09:00:00",
-    datetime_to="2025-01-20T17:00:00"
+    past_hours=24,  # or timedelta(hours=24) for Pythonic approach
+    # date_from=datetime.now() - timedelta(days=7),  # Alternative: datetime objects
+    # date_to=datetime.now(),  # Automatic hour precision detection
 )
 ```
 
 #### Property Filters
 ```py
-# Filter by bedrooms, bathrooms, and square footage
+# Combine any filters: beds, baths, sqft, price, lot_sqft, year_built
 properties = scrape_property(
     location="San Francisco, CA",
     listing_type="for_sale",
-    beds_min=2,
-    beds_max=4,
+    beds_min=3, beds_max=5,
     baths_min=2.0,
-    sqft_min=1000,
-    sqft_max=2500
-)
-
-# Filter by price range
-properties = scrape_property(
-    location="Phoenix, AZ",
-    listing_type="for_sale",
-    price_min=200000,
-    price_max=500000
-)
-
-# Filter by year built
-properties = scrape_property(
-    location="Seattle, WA",
-    listing_type="for_sale",
+    sqft_min=1500, sqft_max=3000,
+    price_min=300000, price_max=800000,
     year_built_min=2000,
-    beds_min=3
-)
-
-# Combine multiple filters
-properties = scrape_property(
-    location="Denver, CO",
-    listing_type="for_sale",
-    beds_min=3,
-    baths_min=2.0,
-    sqft_min=1500,
-    price_min=300000,
-    price_max=600000,
-    year_built_min=1990,
     lot_sqft_min=5000
 )
 ```
 
-#### Sorting Results
+#### Sorting & Listing Types
 ```py
-# Sort by price (cheapest first)
+# Sort options: list_price, list_date, sqft, beds, baths, last_update_date
+# Listing types: "for_sale", "for_rent", "sold", "pending", list, or None (all)
 properties = scrape_property(
     location="Miami, FL",
-    listing_type="for_sale",
-    sort_by="list_price",
-    sort_direction="asc",
+    listing_type=["for_sale", "pending"],  # Single string, list, or None
+    sort_by="list_price",  # Sort field
+    sort_direction="asc",  # "asc" or "desc"
     limit=100
-)
-
-# Sort by newest listings
-properties = scrape_property(
-    location="Boston, MA",
-    listing_type="for_sale",
-    sort_by="list_date",
-    sort_direction="desc"
-)
-
-# Sort by square footage (largest first)
-properties = scrape_property(
-    location="Los Angeles, CA",
-    listing_type="for_sale",
-    sort_by="sqft",
-    sort_direction="desc"
 )
 ```
 
@@ -234,13 +171,14 @@ Optional
 │
 ├── date_from, date_to (string): Start and end dates to filter properties listed or sold, both dates are required.
 |    (use this to get properties in chunks as there's a 10k result limit)
-│    Format for both must be "YYYY-MM-DD".
-│    Example: "2023-05-01", "2023-05-15" (fetches properties listed/sold between these dates)
-│
-├── datetime_from, datetime_to (string): ISO 8601 datetime strings for hour-precise filtering. Uses client-side filtering.
-│    Format: "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD"
-│    Example: "2025-01-20T09:00:00", "2025-01-20T17:00:00" (fetches properties between 9 AM and 5 PM)
-│    Note: Cannot be used together with date_from/date_to
+│    Accepts multiple formats with automatic precision detection:
+│    - Date strings: "YYYY-MM-DD" (day precision)
+│    - Datetime strings: "YYYY-MM-DDTHH:MM:SS" (hour precision, uses client-side filtering)
+│    - date objects: date(2025, 1, 20) (day precision)
+│    - datetime objects: datetime(2025, 1, 20, 9, 0) (hour precision)
+│    Examples:
+│      Day precision: "2023-05-01", "2023-05-15"
+│      Hour precision: "2025-01-20T09:00:00", "2025-01-20T17:00:00"
 │
 ├── beds_min, beds_max (integer): Filter by number of bedrooms
 │    Example: beds_min=2, beds_max=4 (2-4 bedrooms)

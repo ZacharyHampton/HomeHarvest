@@ -38,6 +38,7 @@ ordered_properties = [
     "last_sold_date",
     "last_sold_price",
     "last_status_change_date",
+    "last_update_date",
     "assessed_value",
     "estimated_value",
     "tax",
@@ -156,24 +157,45 @@ def process_result(result: Property) -> pd.DataFrame:
     return properties_df[ordered_properties]
 
 
-def validate_input(listing_type: str) -> None:
-    if listing_type.upper() not in ListingType.__members__:
-        raise InvalidListingType(f"Provided listing type, '{listing_type}', does not exist.")
+def validate_input(listing_type: str | list[str] | None) -> None:
+    if listing_type is None:
+        return  # None is valid - returns all types
+
+    if isinstance(listing_type, list):
+        for lt in listing_type:
+            if lt.upper() not in ListingType.__members__:
+                raise InvalidListingType(f"Provided listing type, '{lt}', does not exist.")
+    else:
+        if listing_type.upper() not in ListingType.__members__:
+            raise InvalidListingType(f"Provided listing type, '{listing_type}', does not exist.")
 
 
 def validate_dates(date_from: str | None, date_to: str | None) -> None:
-    if isinstance(date_from, str) != isinstance(date_to, str):
-        raise InvalidDate("Both date_from and date_to must be provided.")
+    # Allow either date_from or date_to individually, or both together
+    try:
+        # Validate and parse date_from if provided
+        date_from_obj = None
+        if date_from:
+            date_from_str = date_from.replace('Z', '+00:00') if date_from.endswith('Z') else date_from
+            date_from_obj = datetime.fromisoformat(date_from_str)
 
-    if date_from and date_to:
-        try:
-            date_from_obj = datetime.strptime(date_from, "%Y-%m-%d")
-            date_to_obj = datetime.strptime(date_to, "%Y-%m-%d")
+        # Validate and parse date_to if provided
+        date_to_obj = None
+        if date_to:
+            date_to_str = date_to.replace('Z', '+00:00') if date_to.endswith('Z') else date_to
+            date_to_obj = datetime.fromisoformat(date_to_str)
 
-            if date_to_obj < date_from_obj:
-                raise InvalidDate("date_to must be after date_from.")
-        except ValueError:
-            raise InvalidDate(f"Invalid date format or range")
+        # If both provided, ensure date_to is after date_from
+        if date_from_obj and date_to_obj and date_to_obj < date_from_obj:
+            raise InvalidDate(f"date_to ('{date_to}') must be after date_from ('{date_from}').")
+
+    except ValueError as e:
+        # Provide specific guidance on the expected format
+        raise InvalidDate(
+            f"Invalid date format. Expected ISO 8601 format. "
+            f"Examples: '2025-01-20' (date only) or '2025-01-20T14:30:00' (with time). "
+            f"Got: date_from='{date_from}', date_to='{date_to}'. Error: {e}"
+        )
 
 
 def validate_limit(limit: int) -> None:
@@ -213,19 +235,51 @@ def validate_offset(offset: int, limit: int = 10000) -> None:
         )
 
 
-def validate_datetime(datetime_str: str | None) -> None:
-    """Validate ISO 8601 datetime format."""
-    if not datetime_str:
+def validate_datetime(datetime_value) -> None:
+    """Validate datetime value (accepts datetime objects or ISO 8601 strings)."""
+    if datetime_value is None:
         return
+
+    # Already a datetime object - valid
+    from datetime import datetime as dt, date
+    if isinstance(datetime_value, (dt, date)):
+        return
+
+    # Must be a string - validate ISO 8601 format
+    if not isinstance(datetime_value, str):
+        raise InvalidDate(
+            f"Invalid datetime value. Expected datetime object, date object, or ISO 8601 string. "
+            f"Got: {type(datetime_value).__name__}"
+        )
 
     try:
         # Try parsing as ISO 8601 datetime
-        datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+        datetime.fromisoformat(datetime_value.replace('Z', '+00:00'))
     except (ValueError, AttributeError):
         raise InvalidDate(
-            f"Invalid datetime format: '{datetime_str}'. "
+            f"Invalid datetime format: '{datetime_value}'. "
             f"Expected ISO 8601 format (e.g., '2025-01-20T14:30:00' or '2025-01-20')."
         )
+
+
+def validate_last_update_filters(updated_since: str | None, updated_in_past_hours: int | None) -> None:
+    """Validate last_update_date filtering parameters."""
+    if updated_since and updated_in_past_hours:
+        raise ValueError(
+            "Cannot use both 'updated_since' and 'updated_in_past_hours' parameters together. "
+            "Please use only one method to filter by last_update_date."
+        )
+
+    # Validate updated_since format if provided
+    if updated_since:
+        validate_datetime(updated_since)
+
+    # Validate updated_in_past_hours range if provided
+    if updated_in_past_hours is not None:
+        if updated_in_past_hours < 1:
+            raise ValueError(
+                f"updated_in_past_hours must be at least 1. Got: {updated_in_past_hours}"
+            )
 
 
 def validate_filters(
@@ -259,7 +313,7 @@ def validate_filters(
 
 def validate_sort(sort_by: str | None, sort_direction: str | None = "desc") -> None:
     """Validate sort parameters."""
-    valid_sort_fields = ["list_date", "sold_date", "list_price", "sqft", "beds", "baths"]
+    valid_sort_fields = ["list_date", "sold_date", "list_price", "sqft", "beds", "baths", "last_update_date"]
     valid_directions = ["asc", "desc"]
 
     if sort_by and sort_by not in valid_sort_fields:
@@ -273,3 +327,138 @@ def validate_sort(sort_by: str | None, sort_direction: str | None = "desc") -> N
             f"Invalid sort_direction value: '{sort_direction}'. "
             f"Valid options: {', '.join(valid_directions)}"
         )
+
+
+def convert_to_datetime_string(value) -> str | None:
+    """
+    Convert datetime object or string to ISO 8601 string format.
+
+    Accepts:
+    - datetime.datetime objects
+    - datetime.date objects
+    - ISO 8601 strings (returned as-is)
+    - None (returns None)
+
+    Returns ISO 8601 formatted string or None.
+    """
+    if value is None:
+        return None
+
+    # Already a string - return as-is
+    if isinstance(value, str):
+        return value
+
+    # datetime.datetime object
+    from datetime import datetime, date
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    # datetime.date object (convert to datetime at midnight)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()).isoformat()
+
+    raise ValueError(
+        f"Invalid datetime value. Expected datetime object, date object, or ISO 8601 string. "
+        f"Got: {type(value).__name__}"
+    )
+
+
+def extract_timedelta_hours(value) -> int | None:
+    """
+    Extract hours from int or timedelta object.
+
+    Accepts:
+    - int (returned as-is)
+    - timedelta objects (converted to total hours)
+    - None (returns None)
+
+    Returns integer hours or None.
+    """
+    if value is None:
+        return None
+
+    # Already an int - return as-is
+    if isinstance(value, int):
+        return value
+
+    # timedelta object - convert to hours
+    from datetime import timedelta
+    if isinstance(value, timedelta):
+        return int(value.total_seconds() / 3600)
+
+    raise ValueError(
+        f"Invalid past_hours value. Expected int or timedelta object. "
+        f"Got: {type(value).__name__}"
+    )
+
+
+def extract_timedelta_days(value) -> int | None:
+    """
+    Extract days from int or timedelta object.
+
+    Accepts:
+    - int (returned as-is)
+    - timedelta objects (converted to total days)
+    - None (returns None)
+
+    Returns integer days or None.
+    """
+    if value is None:
+        return None
+
+    # Already an int - return as-is
+    if isinstance(value, int):
+        return value
+
+    # timedelta object - convert to days
+    from datetime import timedelta
+    if isinstance(value, timedelta):
+        return int(value.total_seconds() / 86400)  # 86400 seconds in a day
+
+    raise ValueError(
+        f"Invalid past_days value. Expected int or timedelta object. "
+        f"Got: {type(value).__name__}"
+    )
+
+
+def detect_precision_and_convert(value):
+    """
+    Detect if input has time precision and convert to ISO string.
+
+    Accepts:
+    - datetime.datetime objects → (ISO string, "hour")
+    - datetime.date objects → (ISO string at midnight, "day")
+    - ISO 8601 datetime strings with time → (string as-is, "hour")
+    - Date-only strings "YYYY-MM-DD" → (string as-is, "day")
+    - None → (None, None)
+
+    Returns:
+        tuple: (iso_string, precision) where precision is "day" or "hour"
+    """
+    if value is None:
+        return (None, None)
+
+    from datetime import datetime as dt, date
+
+    # datetime.datetime object - has time precision
+    if isinstance(value, dt):
+        return (value.isoformat(), "hour")
+
+    # datetime.date object - day precision only
+    if isinstance(value, date):
+        # Convert to datetime at midnight
+        return (dt.combine(value, dt.min.time()).isoformat(), "day")
+
+    # String - detect if it has time component
+    if isinstance(value, str):
+        # ISO 8601 datetime with time component (has 'T' and time)
+        if 'T' in value:
+            return (value, "hour")
+        # Date-only string
+        else:
+            return (value, "day")
+
+    raise ValueError(
+        f"Invalid date value. Expected datetime object, date object, or ISO 8601 string. "
+        f"Got: {type(value).__name__}"
+    )

@@ -46,9 +46,17 @@ class RealtorScraper(Scraper):
         super().__init__(scraper_input)
 
     def handle_location(self):
+        # Get client_id from listing_type
+        if self.listing_type is None:
+            client_id = "for-sale"
+        elif isinstance(self.listing_type, list):
+            client_id = self.listing_type[0].value.lower().replace("_", "-") if self.listing_type else "for-sale"
+        else:
+            client_id = self.listing_type.value.lower().replace("_", "-")
+
         params = {
             "input": self.location,
-            "client_id": self.listing_type.value.lower().replace("_", "-"),
+            "client_id": client_id,
             "limit": "1",
             "area_types": "city,state,county,postal_code,address,street,neighborhood,school,school_district,university,park",
         }
@@ -134,34 +142,48 @@ class RealtorScraper(Scraper):
         date_param = ""
 
         # Determine date field based on listing type
-        if self.listing_type == ListingType.SOLD:
-            date_field = "sold_date"
-        elif self.listing_type in [ListingType.FOR_SALE, ListingType.FOR_RENT]:
-            date_field = "list_date"
-        else:  # PENDING
-            # Skip server-side date filtering for PENDING as both pending_date and contract_date
-            # filters are broken in the API. Client-side filtering will be applied later.
-            date_field = None
+        # Convert listing_type to list for uniform handling
+        if self.listing_type is None:
+            listing_types = []
+            date_field = None  # When no listing_type is specified, skip date filtering
+        elif isinstance(self.listing_type, list):
+            listing_types = self.listing_type
+            # For multiple types, we'll use a general date field or skip
+            date_field = None  # Skip date filtering for mixed types
+        else:
+            listing_types = [self.listing_type]
+            # Determine date field for single type
+            if self.listing_type == ListingType.SOLD:
+                date_field = "sold_date"
+            elif self.listing_type in [ListingType.FOR_SALE, ListingType.FOR_RENT]:
+                date_field = "list_date"
+            else:  # PENDING or other types
+                # Skip server-side date filtering for PENDING as both pending_date and contract_date
+                # filters are broken in the API. Client-side filtering will be applied later.
+                date_field = None
 
         # Build date parameter (expand to full days if hour-based filtering is used)
         if date_field:
-            if self.datetime_from or self.datetime_to:
+            # Check if we have hour precision (need to extract date part for API, then filter client-side)
+            has_hour_precision = (self.date_from_precision == "hour" or self.date_to_precision == "hour")
+
+            if has_hour_precision and (self.date_from or self.date_to):
                 # Hour-based datetime filtering: extract date parts for API, client-side filter by hours
                 from datetime import datetime
 
                 min_date = None
                 max_date = None
 
-                if self.datetime_from:
+                if self.date_from:
                     try:
-                        dt_from = datetime.fromisoformat(self.datetime_from.replace('Z', '+00:00'))
+                        dt_from = datetime.fromisoformat(self.date_from.replace('Z', '+00:00'))
                         min_date = dt_from.strftime("%Y-%m-%d")
                     except (ValueError, AttributeError):
                         pass
 
-                if self.datetime_to:
+                if self.date_to:
                     try:
-                        dt_to = datetime.fromisoformat(self.datetime_to.replace('Z', '+00:00'))
+                        dt_to = datetime.fromisoformat(self.date_to.replace('Z', '+00:00'))
                         max_date = dt_to.strftime("%Y-%m-%d")
                     except (ValueError, AttributeError):
                         pass
@@ -250,13 +272,15 @@ class RealtorScraper(Scraper):
         # Build sort parameter
         if self.sort_by:
             sort_param = f"sort: [{{ field: {self.sort_by}, direction: {self.sort_direction} }}]"
-        elif self.listing_type == ListingType.SOLD:
+        elif isinstance(self.listing_type, ListingType) and self.listing_type == ListingType.SOLD:
             sort_param = "sort: [{ field: sold_date, direction: desc }]"
         else:
             sort_param = ""  #: prioritize normal fractal sort from realtor
 
+        # Handle PENDING with or_filters (applies if PENDING is in the list or is the single type)
+        has_pending = ListingType.PENDING in listing_types
         pending_or_contingent_param = (
-            "or_filters: { contingent: true, pending: true }" if self.listing_type == ListingType.PENDING else ""
+            "or_filters: { contingent: true, pending: true }" if has_pending else ""
         )
 
         # Build bucket parameter (only use fractal sort if no custom sort is specified)
@@ -264,7 +288,27 @@ class RealtorScraper(Scraper):
         if not self.sort_by:
             bucket_param = 'bucket: { sort: "fractal_v1.1.3_fr" }'
 
-        listing_type = ListingType.FOR_SALE if self.listing_type == ListingType.PENDING else self.listing_type
+        # Build status parameter
+        # For PENDING, we need to query as FOR_SALE with or_filters for pending/contingent
+        status_types = []
+        for lt in listing_types:
+            if lt == ListingType.PENDING:
+                if ListingType.FOR_SALE not in status_types:
+                    status_types.append(ListingType.FOR_SALE)
+            else:
+                if lt not in status_types:
+                    status_types.append(lt)
+
+        # Build status parameter string
+        if status_types:
+            status_values = [st.value.lower() for st in status_types]
+            if len(status_values) == 1:
+                status_param = f"status: {status_values[0]}"
+            else:
+                status_param = f"status: [{', '.join(status_values)}]"
+        else:
+            status_param = ""  # No status parameter means return all types
+
         is_foreclosure = ""
 
         if variables.get("foreclosure") is True:
@@ -285,7 +329,7 @@ class RealtorScraper(Scraper):
                                     coordinates: $coordinates
                                     radius: $radius
                                 }
-                                status: %s
+                                %s
                                 %s
                                 %s
                                 %s
@@ -297,7 +341,7 @@ class RealtorScraper(Scraper):
                     ) %s
                 }""" % (
                 is_foreclosure,
-                listing_type.value.lower(),
+                status_param,
                 date_param,
                 property_type_param,
                 property_filters_param,
@@ -320,7 +364,7 @@ class RealtorScraper(Scraper):
                                         county: $county
                                         postal_code: $postal_code
                                         state_code: $state_code
-                                        status: %s
+                                        %s
                                         %s
                                         %s
                                         %s
@@ -333,7 +377,7 @@ class RealtorScraper(Scraper):
                                 ) %s
                             }""" % (
                 is_foreclosure,
-                listing_type.value.lower(),
+                status_param,
                 date_param,
                 property_type_param,
                 property_filters_param,
@@ -510,12 +554,17 @@ class RealtorScraper(Scraper):
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)
-        if self.past_hours or self.datetime_from or self.datetime_to:
+        has_hour_precision = (self.date_from_precision == "hour" or self.date_to_precision == "hour")
+        if self.past_hours or has_hour_precision:
             homes = self._apply_hour_based_date_filter(homes)
         # Apply client-side date filtering for PENDING properties
         # (server-side filters are broken in the API)
         elif self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
             homes = self._apply_pending_date_filter(homes)
+
+        # Apply client-side filtering by last_update_date if specified
+        if self.updated_since or self.updated_in_past_hours:
+            homes = self._apply_last_update_date_filter(homes)
 
         # Apply client-side sort to ensure results are properly ordered
         # This is necessary after filtering and to guarantee sort order across page boundaries
@@ -532,7 +581,7 @@ class RealtorScraper(Scraper):
     def _apply_hour_based_date_filter(self, homes):
         """Apply client-side hour-based date filtering for all listing types.
 
-        This is used when past_hours, datetime_from, or datetime_to are specified,
+        This is used when past_hours or date_from/date_to have hour precision,
         since the API only supports day-level filtering.
         """
         if not homes:
@@ -546,17 +595,17 @@ class RealtorScraper(Scraper):
         if self.past_hours:
             cutoff_datetime = datetime.now() - timedelta(hours=self.past_hours)
             date_range = {'type': 'since', 'date': cutoff_datetime}
-        elif self.datetime_from or self.datetime_to:
+        elif self.date_from or self.date_to:
             try:
                 from_datetime = None
                 to_datetime = None
 
-                if self.datetime_from:
-                    from_datetime_str = self.datetime_from.replace('Z', '+00:00') if self.datetime_from.endswith('Z') else self.datetime_from
+                if self.date_from:
+                    from_datetime_str = self.date_from.replace('Z', '+00:00') if self.date_from.endswith('Z') else self.date_from
                     from_datetime = datetime.fromisoformat(from_datetime_str).replace(tzinfo=None)
 
-                if self.datetime_to:
-                    to_datetime_str = self.datetime_to.replace('Z', '+00:00') if self.datetime_to.endswith('Z') else self.datetime_to
+                if self.date_to:
+                    to_datetime_str = self.date_to.replace('Z', '+00:00') if self.date_to.endswith('Z') else self.date_to
                     to_datetime = datetime.fromisoformat(to_datetime_str).replace(tzinfo=None)
 
                 if from_datetime and to_datetime:
@@ -688,7 +737,51 @@ class RealtorScraper(Scraper):
             if hasattr(home, 'flags') and home.flags:
                 return getattr(home.flags, 'is_contingent', False)
             return False
-    
+
+    def _apply_last_update_date_filter(self, homes):
+        """Apply client-side filtering by last_update_date.
+
+        This is used when updated_since or updated_in_past_hours are specified.
+        Filters properties based on when they were last updated.
+        """
+        if not homes:
+            return homes
+
+        from datetime import datetime, timedelta
+
+        # Determine date range for last_update_date filtering
+        date_range = None
+
+        if self.updated_in_past_hours:
+            cutoff_datetime = datetime.now() - timedelta(hours=self.updated_in_past_hours)
+            date_range = {'type': 'since', 'date': cutoff_datetime}
+        elif self.updated_since:
+            try:
+                since_datetime_str = self.updated_since.replace('Z', '+00:00') if self.updated_since.endswith('Z') else self.updated_since
+                since_datetime = datetime.fromisoformat(since_datetime_str).replace(tzinfo=None)
+                date_range = {'type': 'since', 'date': since_datetime}
+            except (ValueError, AttributeError):
+                return homes  # If parsing fails, return unfiltered
+
+        if not date_range:
+            return homes
+
+        filtered_homes = []
+
+        for home in homes:
+            # Extract last_update_date from the property
+            property_date = self._extract_date_from_home(home, 'last_update_date')
+
+            # Skip properties without last_update_date
+            if property_date is None:
+                continue
+
+            # Check if property date falls within the specified range
+            if self._is_datetime_in_range(property_date, date_range):
+                filtered_homes.append(home)
+
+        return filtered_homes
+
     def _get_date_range(self):
         """Get the date range for filtering based on instance parameters."""
         from datetime import datetime, timedelta
@@ -781,7 +874,7 @@ class RealtorScraper(Scraper):
                 return (1, 0) if self.sort_direction == "desc" else (1, float('inf'))
 
             # For datetime fields, convert string to datetime for proper sorting
-            if self.sort_by in ['list_date', 'sold_date', 'pending_date']:
+            if self.sort_by in ['list_date', 'sold_date', 'pending_date', 'last_update_date']:
                 if isinstance(value, str):
                     try:
                         from datetime import datetime
