@@ -34,7 +34,7 @@ filename = f"HomeHarvest_{current_timestamp}.csv"
 
 properties = scrape_property(
   location="San Diego, CA",
-  listing_type="sold",  # or (for_sale, for_rent, pending)
+  listing_type="sold",  # or for_sale, for_rent, pending, ["for_sale", "sold"], None (all types)
   past_days=30,  # sold in last 30 days - listed in last 30 days if (for_sale, for_rent)
 
   # property_type=['single_family','multi_family'],
@@ -42,6 +42,8 @@ properties = scrape_property(
   # date_to="2023-05-28",
   # foreclosure=True
   # mls_only=True,  # only fetch MLS listings
+  # updated_in_past_hours=24,  # filter by last_update_date
+  # sort_by="last_update_date",  # sort by last update
 )
 print(f"Number of properties: {len(properties)}")
 
@@ -154,6 +156,83 @@ properties = scrape_property(
     listing_type="for_sale",
     sort_by="sqft",
     sort_direction="desc"
+)
+
+# Sort by most recently updated
+properties = scrape_property(
+    location="New York, NY",
+    listing_type="for_sale",
+    sort_by="last_update_date",
+    sort_direction="desc"
+)
+```
+
+#### Multiple Listing Types
+```py
+# Get both for_sale and pending properties
+properties = scrape_property(
+    location="Austin, TX",
+    listing_type=["for_sale", "pending"],  # Returns properties matching ANY status
+    limit=100
+)
+
+# Get all listing types
+properties = scrape_property(
+    location="Seattle, WA",
+    listing_type=None,  # Returns for_sale, for_rent, sold, pending, etc.
+    limit=100
+)
+```
+
+#### Filter by Last Update Date
+```py
+from datetime import datetime, timedelta
+
+# Get properties updated in the last 24 hours
+properties = scrape_property(
+    location="Miami, FL",
+    listing_type="for_sale",
+    updated_in_past_hours=24,
+    sort_by="last_update_date",
+    sort_direction="desc"
+)
+
+# Get properties updated since a specific date/time
+properties = scrape_property(
+    location="Chicago, IL",
+    listing_type="for_sale",
+    updated_since=datetime(2025, 11, 10, 9, 0),  # datetime object
+    limit=100
+)
+
+# Or use ISO string
+properties = scrape_property(
+    location="Portland, OR",
+    listing_type="for_sale",
+    updated_since="2025-11-10T09:00:00",  # ISO string
+    limit=100
+)
+```
+
+#### Pythonic Time Filtering
+```py
+from datetime import datetime, timedelta
+
+# Use timedelta objects for more readable code
+properties = scrape_property(
+    location="Denver, CO",
+    listing_type="for_sale",
+    past_hours=timedelta(hours=6),  # More Pythonic than past_hours=6
+    limit=100
+)
+
+# Use datetime objects for precise time ranges
+properties = scrape_property(
+    location="Phoenix, AZ",
+    listing_type="for_sale",
+    datetime_from=datetime.now() - timedelta(days=7),
+    datetime_to=datetime.now(),
+    limit=100
 )
 ```
 
