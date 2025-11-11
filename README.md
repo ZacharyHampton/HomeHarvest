@@ -129,30 +129,38 @@ for prop in properties[:5]:
 ```
 Required
 ├── location (str): Flexible location search - accepts any of these formats:
-    - ZIP code: "92104"
-    - City: "San Diego" or "San Francisco"
-    - City, State (abbreviated or full): "San Diego, CA" or "San Diego, California"
-    - Full address: "1234 Main St, San Diego, CA 92104"
-    - Neighborhood: "Downtown San Diego"
-    - County: "San Diego County"
+│    - ZIP code: "92104"
+│    - City: "San Diego" or "San Francisco"
+│    - City, State (abbreviated or full): "San Diego, CA" or "San Diego, California"
+│    - Full address: "1234 Main St, San Diego, CA 92104"
+│    - Neighborhood: "Downtown San Diego"
+│    - County: "San Diego County"
+│    - State (no support for abbreviated): "California"
+│
 ├── listing_type (str | list[str] | None): Choose the type of listing.
-    - Single string: 'for_rent', 'for_sale', 'sold', 'pending'
-    - List of strings: ['for_sale', 'pending'] (returns properties matching ANY status)
-    - None: Returns all listing types
-    Example: listing_type="sold" or ["for_sale", "pending"] or None
-
+│    - 'for_sale'
+│    - 'for_rent'
+│    - 'sold'
+│    - 'pending'
+│    - 'off_market'
+│    - 'new_community'
+│    - 'other'
+│    - 'ready_to_build'
+│    - List of strings returns properties matching ANY status: ['for_sale', 'pending']
+│    - None returns all listing types
+│
 Optional
 ├── property_type (list): Choose the type of properties.
-    - 'single_family'
-    - 'multi_family'
-    - 'condos'
-    - 'condo_townhome_rowhome_coop'
-    - 'condo_townhome'
-    - 'townhomes'
-    - 'duplex_triplex'
-    - 'farm'
-    - 'land'
-    - 'mobile'
+│    - 'single_family'
+│    - 'multi_family'
+│    - 'condos'
+│    - 'condo_townhome_rowhome_coop'
+│    - 'condo_townhome'
+│    - 'townhomes'
+│    - 'duplex_triplex'
+│    - 'farm'
+│    - 'land'
+│    - 'mobile'
 │
 ├── return_type (option): Choose the return type.
 │    - 'pandas' (default)
@@ -170,7 +178,7 @@ Optional
 │    Note: Cannot be used together with past_days or date_from/date_to
 │
 ├── date_from, date_to (string): Start and end dates to filter properties listed or sold, both dates are required.
-|    (use this to get properties in chunks as there's a 10k result limit)
+│    (use this to get properties in chunks as there's a 10k result limit)
 │    Accepts multiple formats with automatic precision detection:
 │    - Date strings: "YYYY-MM-DD" (day precision)
 │    - Datetime strings: "YYYY-MM-DDTHH:MM:SS" (hour precision, uses client-side filtering)
