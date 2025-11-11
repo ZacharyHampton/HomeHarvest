@@ -10,6 +10,7 @@ _SEARCH_HOMES_DATA_BASE = """{
     last_sold_price
     last_sold_date
     last_status_change_date
+    last_update_date
     list_price
     list_price_max
     list_price_min

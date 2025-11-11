@@ -43,6 +43,10 @@ class ListingType(Enum):
     FOR_RENT = "FOR_RENT"
     PENDING = "PENDING"
     SOLD = "SOLD"
+    OFF_MARKET = "OFF_MARKET"
+    NEW_COMMUNITY = "NEW_COMMUNITY"
+    OTHER = "OTHER"
+    READY_TO_BUILD = "READY_TO_BUILD"
 
 
 class PropertyType(Enum):
@@ -193,6 +197,7 @@ class Property(BaseModel):
     pending_date: datetime | None = Field(None, description="The date listing went into pending state")
     last_sold_date: datetime | None = Field(None, description="Last time the Home was sold")
     last_status_change_date: datetime | None = Field(None, description="Last time the status of the listing changed")
+    last_update_date: datetime | None = Field(None, description="Last time the home was updated")
     prc_sqft: int | None = None
     new_construction: bool | None = Field(None, description="Search for new construction homes")
     hoa_fee: int | None = Field(None, description="Search for homes where HOA fee is known and falls within specified range")

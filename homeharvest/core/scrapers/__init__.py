@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 class ScraperInput(BaseModel):
     location: str
-    listing_type: ListingType
+    listing_type: ListingType | list[ListingType] | None
     property_type: list[SearchPropertyType] | None = None
     radius: float | None = None
     mls_only: bool | None = False

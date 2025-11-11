@@ -126,6 +126,7 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
         last_sold_date=(datetime.fromisoformat(result["last_sold_date"].replace('Z', '+00:00') if result["last_sold_date"].endswith('Z') else result["last_sold_date"]) if result.get("last_sold_date") else None),
         pending_date=(datetime.fromisoformat(result["pending_date"].replace('Z', '+00:00') if result["pending_date"].endswith('Z') else result["pending_date"]) if result.get("pending_date") else None),
         last_status_change_date=(datetime.fromisoformat(result["last_status_change_date"].replace('Z', '+00:00') if result["last_status_change_date"].endswith('Z') else result["last_status_change_date"]) if result.get("last_status_change_date") else None),
+        last_update_date=(datetime.fromisoformat(result["last_update_date"].replace('Z', '+00:00') if result["last_update_date"].endswith('Z') else result["last_update_date"]) if result.get("last_update_date") else None),
         new_construction=result["flags"].get("is_new_construction") is True,
         hoa_fee=(result["hoa"]["fee"] if result.get("hoa") and isinstance(result["hoa"], dict) else None),
         latitude=(result["location"]["address"]["coordinate"].get("lat") if able_to_get_lat_long else None),

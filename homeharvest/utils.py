@@ -38,6 +38,7 @@ ordered_properties = [
     "last_sold_date",
     "last_sold_price",
     "last_status_change_date",
+    "last_update_date",
     "assessed_value",
     "estimated_value",
     "tax",
@@ -156,9 +157,17 @@ def process_result(result: Property) -> pd.DataFrame:
     return properties_df[ordered_properties]
 
 
-def validate_input(listing_type: str) -> None:
-    if listing_type.upper() not in ListingType.__members__:
-        raise InvalidListingType(f"Provided listing type, '{listing_type}', does not exist.")
+def validate_input(listing_type: str | list[str] | None) -> None:
+    if listing_type is None:
+        return  # None is valid - returns all types
+
+    if isinstance(listing_type, list):
+        for lt in listing_type:
+            if lt.upper() not in ListingType.__members__:
+                raise InvalidListingType(f"Provided listing type, '{lt}', does not exist.")
+    else:
+        if listing_type.upper() not in ListingType.__members__:
+            raise InvalidListingType(f"Provided listing type, '{listing_type}', does not exist.")
 
 
 def validate_dates(date_from: str | None, date_to: str | None) -> None:
@@ -259,7 +268,7 @@ def validate_filters(
 
 def validate_sort(sort_by: str | None, sort_direction: str | None = "desc") -> None:
     """Validate sort parameters."""
-    valid_sort_fields = ["list_date", "sold_date", "list_price", "sqft", "beds", "baths"]
+    valid_sort_fields = ["list_date", "sold_date", "list_price", "sqft", "beds", "baths", "last_update_date"]
     valid_directions = ["asc", "desc"]
 
     if sort_by and sort_by not in valid_sort_fields:

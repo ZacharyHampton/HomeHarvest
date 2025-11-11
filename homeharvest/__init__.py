@@ -8,7 +8,7 @@ from typing import Union, Optional, List
 
 def scrape_property(
     location: str,
-    listing_type: str = "for_sale",
+    listing_type: str | list[str] | None = None,
     return_type: str = "pandas",
     property_type: Optional[List[str]] = None,
     radius: float = None,
@@ -47,7 +47,9 @@ def scrape_property(
     Scrape properties from Realtor.com based on a given location and listing type.
 
     :param location: Location to search (e.g. "Dallas, TX", "85281", "2530 Al Lipscomb Way")
-    :param listing_type: Listing Type (for_sale, for_rent, sold, pending)
+    :param listing_type: Listing Type - can be a string, list of strings, or None.
+        Options: for_sale, for_rent, sold, pending, off_market, new_community, other, ready_to_build
+        Examples: "for_sale", ["for_sale", "pending"], None (returns all types)
     :param return_type: Return type (pandas, pydantic, raw)
     :param property_type: Property Type (single_family, multi_family, condos, condo_townhome_rowhome_coop, condo_townhome, townhomes, duplex_triplex, farm, land, mobile)
     :param radius: Get properties within _ (e.g. 1.0) miles. Only applicable for individual addresses.
@@ -73,7 +75,7 @@ def scrape_property(
     :param price_min, price_max: Filter by listing price
     :param lot_sqft_min, lot_sqft_max: Filter by lot size
     :param year_built_min, year_built_max: Filter by year built
-    :param sort_by: Sort results by field (list_date, sold_date, list_price, sqft, beds, baths)
+    :param sort_by: Sort results by field (list_date, sold_date, list_price, sqft, beds, baths, last_update_date)
     :param sort_direction: Sort direction (asc, desc)
     """
     validate_input(listing_type)
@@ -88,9 +90,17 @@ def scrape_property(
     )
     validate_sort(sort_by, sort_direction)
 
+    # Convert listing_type to appropriate format
+    if listing_type is None:
+        converted_listing_type = None
+    elif isinstance(listing_type, list):
+        converted_listing_type = [ListingType(lt.upper()) for lt in listing_type]
+    else:
+        converted_listing_type = ListingType(listing_type.upper())
+
     scraper_input = ScraperInput(
         location=location,
-        listing_type=ListingType(listing_type.upper()),
+        listing_type=converted_listing_type,
         return_type=ReturnType(return_type.lower()),
         property_type=[SearchPropertyType[prop.upper()] for prop in property_type] if property_type else None,
         proxy=proxy,
