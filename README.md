@@ -135,11 +135,11 @@ Required
     - Full address: "1234 Main St, San Diego, CA 92104"
     - Neighborhood: "Downtown San Diego"
     - County: "San Diego County"
-├── listing_type (option): Choose the type of listing.
-    - 'for_rent'
-    - 'for_sale'
-    - 'sold'
-    - 'pending' (for pending/contingent sales)
+├── listing_type (str | list[str] | None): Choose the type of listing.
+    - Single string: 'for_rent', 'for_sale', 'sold', 'pending'
+    - List of strings: ['for_sale', 'pending'] (returns properties matching ANY status)
+    - None: Returns all listing types
+    Example: listing_type="sold" or ["for_sale", "pending"] or None
 
 Optional
 ├── property_type (list): Choose the type of properties.
@@ -165,8 +165,8 @@ Optional
 ├── past_days (integer): Number of past days to filter properties. Utilizes 'last_sold_date' for 'sold' listing types, and 'list_date' for others (for_rent, for_sale).
 │    Example: 30 (fetches properties listed/sold in the last 30 days)
 │
-├── past_hours (integer): Number of past hours to filter properties (more precise than past_days). Uses client-side filtering.
-│    Example: 24 (fetches properties from the last 24 hours)
+├── past_hours (integer | timedelta): Number of past hours to filter properties (more precise than past_days). Uses client-side filtering.
+│    Example: 24 or timedelta(hours=24) (fetches properties from the last 24 hours)
 │    Note: Cannot be used together with past_days or date_from/date_to
 │
 ├── date_from, date_to (string): Start and end dates to filter properties listed or sold, both dates are required.
@@ -179,6 +179,14 @@ Optional
 │    Examples:
 │      Day precision: "2023-05-01", "2023-05-15"
 │      Hour precision: "2025-01-20T09:00:00", "2025-01-20T17:00:00"
+│
+├── updated_since (datetime | str): Filter properties updated since a specific date/time (based on last_update_date field)
+│    Accepts datetime objects or ISO 8601 strings
+│    Example: updated_since=datetime(2025, 11, 10, 9, 0) or "2025-11-10T09:00:00"
+│
+├── updated_in_past_hours (integer | timedelta): Filter properties updated in the past X hours (based on last_update_date field)
+│    Accepts integer (hours) or timedelta object
+│    Example: updated_in_past_hours=24 or timedelta(hours=24)
 │
 ├── beds_min, beds_max (integer): Filter by number of bedrooms
 │    Example: beds_min=2, beds_max=4 (2-4 bedrooms)
@@ -199,7 +207,7 @@ Optional
 │    Example: year_built_min=2000, year_built_max=2024 (built between 2000-2024)
 │
 ├── sort_by (string): Sort results by field
-│    Options: 'list_date', 'sold_date', 'list_price', 'sqft', 'beds', 'baths'
+│    Options: 'list_date', 'sold_date', 'list_price', 'sqft', 'beds', 'baths', 'last_update_date'
 │    Example: sort_by='list_price'
 │
 ├── sort_direction (string): Sort direction, default is 'desc'
@@ -265,6 +273,7 @@ Property
 │ ├── sold_price
 │ ├── last_sold_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── last_status_change_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
+│ ├── last_update_date  # datetime (full timestamp: YYYY-MM-DD HH:MM:SS)
 │ ├── last_sold_price
 │ ├── price_per_sqft
 │ ├── new_construction
