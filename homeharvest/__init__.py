@@ -1,7 +1,12 @@
 import warnings
 import pandas as pd
+from datetime import datetime, timedelta
 from .core.scrapers import ScraperInput
-from .utils import process_result, ordered_properties, validate_input, validate_dates, validate_limit, validate_offset, validate_datetime, validate_filters, validate_sort
+from .utils import (
+    process_result, ordered_properties, validate_input, validate_dates, validate_limit,
+    validate_offset, validate_datetime, validate_filters, validate_sort, validate_last_update_filters,
+    convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days
+)
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
 from typing import Union, Optional, List
@@ -13,7 +18,7 @@ def scrape_property(
     property_type: Optional[List[str]] = None,
     radius: float = None,
     mls_only: bool = False,
-    past_days: int = None,
+    past_days: int | timedelta = None,
     proxy: str = None,
     date_from: str = None,
     date_to: str = None,
@@ -23,9 +28,12 @@ def scrape_property(
     limit: int = 10000,
     offset: int = 0,
     # New date/time filtering parameters
-    past_hours: int = None,
-    datetime_from: str = None,
-    datetime_to: str = None,
+    past_hours: int | timedelta = None,
+    datetime_from: datetime | str = None,
+    datetime_to: datetime | str = None,
+    # New last_update_date filtering parameters
+    updated_since: datetime | str = None,
+    updated_in_past_hours: int | timedelta = None,
     # New property filtering parameters
     beds_min: int = None,
     beds_max: int = None,
@@ -67,8 +75,10 @@ def scrape_property(
     :param offset: Starting position for pagination within the 10k limit (offset + limit cannot exceed 10,000). Use with limit to fetch results in chunks (e.g., offset=200, limit=200 fetches results 200-399). Should be a multiple of 200 (page size) for optimal performance. Default is 0. Note: Cannot be used to bypass the 10k API limit - use date ranges (date_from/date_to) to narrow searches and fetch more data.
 
     New parameters:
-    :param past_hours: Get properties in the last _ hours (requires client-side filtering)
-    :param datetime_from, datetime_to: ISO 8601 datetime strings for precise time filtering (e.g. "2025-01-20T14:30:00")
+    :param past_hours: Get properties in the last _ hours (requires client-side filtering). Accepts int or timedelta.
+    :param datetime_from, datetime_to: Precise time filtering. Accepts datetime objects or ISO 8601 strings (e.g. "2025-01-20T14:30:00")
+    :param updated_since: Filter by last_update_date (when property was last updated). Accepts datetime object or ISO 8601 string (client-side filtering)
+    :param updated_in_past_hours: Filter by properties updated in the last _ hours. Accepts int or timedelta (client-side filtering)
     :param beds_min, beds_max: Filter by number of bedrooms
     :param baths_min, baths_max: Filter by number of bathrooms
     :param sqft_min, sqft_max: Filter by square footage
@@ -77,6 +87,8 @@ def scrape_property(
     :param year_built_min, year_built_max: Filter by year built
     :param sort_by: Sort results by field (list_date, sold_date, list_price, sqft, beds, baths, last_update_date)
     :param sort_direction: Sort direction (asc, desc)
+
+    Note: past_days and past_hours also accept timedelta objects for more Pythonic usage.
     """
     validate_input(listing_type)
     validate_dates(date_from, date_to)
@@ -90,6 +102,12 @@ def scrape_property(
     )
     validate_sort(sort_by, sort_direction)
 
+    # Validate new last_update_date filtering parameters
+    validate_last_update_filters(
+        convert_to_datetime_string(updated_since),
+        extract_timedelta_hours(updated_in_past_hours)
+    )
+
     # Convert listing_type to appropriate format
     if listing_type is None:
         converted_listing_type = None
@@ -97,6 +115,14 @@ def scrape_property(
         converted_listing_type = [ListingType(lt.upper()) for lt in listing_type]
     else:
         converted_listing_type = ListingType(listing_type.upper())
+
+    # Convert datetime/timedelta objects to appropriate formats
+    converted_past_days = extract_timedelta_days(past_days)
+    converted_past_hours = extract_timedelta_hours(past_hours)
+    converted_datetime_from = convert_to_datetime_string(datetime_from)
+    converted_datetime_to = convert_to_datetime_string(datetime_to)
+    converted_updated_since = convert_to_datetime_string(updated_since)
+    converted_updated_in_past_hours = extract_timedelta_hours(updated_in_past_hours)
 
     scraper_input = ScraperInput(
         location=location,
@@ -106,7 +132,7 @@ def scrape_property(
         proxy=proxy,
         radius=radius,
         mls_only=mls_only,
-        last_x_days=past_days,
+        last_x_days=converted_past_days,
         date_from=date_from,
         date_to=date_to,
         foreclosure=foreclosure,
@@ -115,9 +141,12 @@ def scrape_property(
         limit=limit,
         offset=offset,
         # New date/time filtering
-        past_hours=past_hours,
-        datetime_from=datetime_from,
-        datetime_to=datetime_to,
+        past_hours=converted_past_hours,
+        datetime_from=converted_datetime_from,
+        datetime_to=converted_datetime_to,
+        # New last_update_date filtering
+        updated_since=converted_updated_since,
+        updated_in_past_hours=converted_updated_in_past_hours,
         # New property filtering
         beds_min=beds_min,
         beds_max=beds_max,

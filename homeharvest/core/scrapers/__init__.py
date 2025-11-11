@@ -33,6 +33,10 @@ class ScraperInput(BaseModel):
     datetime_from: str | None = None
     datetime_to: str | None = None
 
+    # New last_update_date filtering parameters
+    updated_since: str | None = None
+    updated_in_past_hours: int | None = None
+
     # New property filtering parameters
     beds_min: int | None = None
     beds_max: int | None = None
@@ -114,6 +118,10 @@ class Scraper:
         self.past_hours = scraper_input.past_hours
         self.datetime_from = scraper_input.datetime_from
         self.datetime_to = scraper_input.datetime_to
+
+        # New last_update_date filtering
+        self.updated_since = scraper_input.updated_since
+        self.updated_in_past_hours = scraper_input.updated_in_past_hours
 
         # New property filtering
         self.beds_min = scraper_input.beds_min

@@ -558,6 +558,10 @@ class RealtorScraper(Scraper):
         elif self.listing_type == ListingType.PENDING and (self.last_x_days or self.date_from):
             homes = self._apply_pending_date_filter(homes)
 
+        # Apply client-side filtering by last_update_date if specified
+        if self.updated_since or self.updated_in_past_hours:
+            homes = self._apply_last_update_date_filter(homes)
+
         # Apply client-side sort to ensure results are properly ordered
         # This is necessary after filtering and to guarantee sort order across page boundaries
         if self.sort_by:
@@ -729,7 +733,51 @@ class RealtorScraper(Scraper):
             if hasattr(home, 'flags') and home.flags:
                 return getattr(home.flags, 'is_contingent', False)
             return False
-    
+
+    def _apply_last_update_date_filter(self, homes):
+        """Apply client-side filtering by last_update_date.
+
+        This is used when updated_since or updated_in_past_hours are specified.
+        Filters properties based on when they were last updated.
+        """
+        if not homes:
+            return homes
+
+        from datetime import datetime, timedelta
+
+        # Determine date range for last_update_date filtering
+        date_range = None
+
+        if self.updated_in_past_hours:
+            cutoff_datetime = datetime.now() - timedelta(hours=self.updated_in_past_hours)
+            date_range = {'type': 'since', 'date': cutoff_datetime}
+        elif self.updated_since:
+            try:
+                since_datetime_str = self.updated_since.replace('Z', '+00:00') if self.updated_since.endswith('Z') else self.updated_since
+                since_datetime = datetime.fromisoformat(since_datetime_str).replace(tzinfo=None)
+                date_range = {'type': 'since', 'date': since_datetime}
+            except (ValueError, AttributeError):
+                return homes  # If parsing fails, return unfiltered
+
+        if not date_range:
+            return homes
+
+        filtered_homes = []
+
+        for home in homes:
+            # Extract last_update_date from the property
+            property_date = self._extract_date_from_home(home, 'last_update_date')
+
+            # Skip properties without last_update_date
+            if property_date is None:
+                continue
+
+            # Check if property date falls within the specified range
+            if self._is_datetime_in_range(property_date, date_range):
+                filtered_homes.append(home)
+
+        return filtered_homes
+
     def _get_date_range(self):
         """Get the date range for filtering based on instance parameters."""
         from datetime import datetime, timedelta
