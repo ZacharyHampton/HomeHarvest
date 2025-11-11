@@ -83,8 +83,8 @@ properties = scrape_property(
 properties = scrape_property(
     location="Dallas, TX",
     listing_type="for_sale",
-    datetime_from="2025-01-20T09:00:00",
-    datetime_to="2025-01-20T17:00:00"
+    date_from="2025-01-20T09:00:00",  # Hour precision automatically detected
+    date_to="2025-01-20T17:00:00"
 )
 ```
 
@@ -230,8 +230,8 @@ properties = scrape_property(
 properties = scrape_property(
     location="Phoenix, AZ",
     listing_type="for_sale",
-    datetime_from=datetime.now() - timedelta(days=7),
-    datetime_to=datetime.now(),
+    date_from=datetime.now() - timedelta(days=7),  # datetime object - hour precision
+    date_to=datetime.now(),
     limit=100
 )
 ```
@@ -313,13 +313,14 @@ Optional
 │
 ├── date_from, date_to (string): Start and end dates to filter properties listed or sold, both dates are required.
 |    (use this to get properties in chunks as there's a 10k result limit)
-│    Format for both must be "YYYY-MM-DD".
-│    Example: "2023-05-01", "2023-05-15" (fetches properties listed/sold between these dates)
-│
-├── datetime_from, datetime_to (string): ISO 8601 datetime strings for hour-precise filtering. Uses client-side filtering.
-│    Format: "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD"
-│    Example: "2025-01-20T09:00:00", "2025-01-20T17:00:00" (fetches properties between 9 AM and 5 PM)
-│    Note: Cannot be used together with date_from/date_to
+│    Accepts multiple formats with automatic precision detection:
+│    - Date strings: "YYYY-MM-DD" (day precision)
+│    - Datetime strings: "YYYY-MM-DDTHH:MM:SS" (hour precision, uses client-side filtering)
+│    - date objects: date(2025, 1, 20) (day precision)
+│    - datetime objects: datetime(2025, 1, 20, 9, 0) (hour precision)
+│    Examples:
+│      Day precision: "2023-05-01", "2023-05-15"
+│      Hour precision: "2025-01-20T09:00:00", "2025-01-20T17:00:00"
 │
 ├── beds_min, beds_max (integer): Filter by number of bedrooms
 │    Example: beds_min=2, beds_max=4 (2-4 bedrooms)

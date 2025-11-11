@@ -176,20 +176,22 @@ def validate_dates(date_from: str | None, date_to: str | None) -> None:
 
     if date_from and date_to:
         try:
-            date_from_obj = datetime.strptime(date_from, "%Y-%m-%d")
-            date_to_obj = datetime.strptime(date_to, "%Y-%m-%d")
+            # Use fromisoformat to accept both date and datetime strings
+            date_from_str = date_from.replace('Z', '+00:00') if date_from.endswith('Z') else date_from
+            date_to_str = date_to.replace('Z', '+00:00') if date_to.endswith('Z') else date_to
+
+            date_from_obj = datetime.fromisoformat(date_from_str)
+            date_to_obj = datetime.fromisoformat(date_to_str)
 
             if date_to_obj < date_from_obj:
                 raise InvalidDate(f"date_to ('{date_to}') must be after date_from ('{date_from}').")
         except ValueError as e:
             # Provide specific guidance on the expected format
-            if "does not match format" in str(e):
-                raise InvalidDate(
-                    f"Invalid date format. Expected 'YYYY-MM-DD' format. "
-                    f"Examples: '2025-01-20', '2024-12-31'. "
-                    f"Got: date_from='{date_from}', date_to='{date_to}'"
-                )
-            raise InvalidDate(f"Invalid date format or range: {e}")
+            raise InvalidDate(
+                f"Invalid date format. Expected ISO 8601 format. "
+                f"Examples: '2025-01-20' (date only) or '2025-01-20T14:30:00' (with time). "
+                f"Got: date_from='{date_from}', date_to='{date_to}'. Error: {e}"
+            )
 
 
 def validate_limit(limit: int) -> None:
@@ -411,5 +413,48 @@ def extract_timedelta_days(value) -> int | None:
 
     raise ValueError(
         f"Invalid past_days value. Expected int or timedelta object. "
+        f"Got: {type(value).__name__}"
+    )
+
+
+def detect_precision_and_convert(value):
+    """
+    Detect if input has time precision and convert to ISO string.
+
+    Accepts:
+    - datetime.datetime objects → (ISO string, "hour")
+    - datetime.date objects → (ISO string at midnight, "day")
+    - ISO 8601 datetime strings with time → (string as-is, "hour")
+    - Date-only strings "YYYY-MM-DD" → (string as-is, "day")
+    - None → (None, None)
+
+    Returns:
+        tuple: (iso_string, precision) where precision is "day" or "hour"
+    """
+    if value is None:
+        return (None, None)
+
+    from datetime import datetime as dt, date
+
+    # datetime.datetime object - has time precision
+    if isinstance(value, dt):
+        return (value.isoformat(), "hour")
+
+    # datetime.date object - day precision only
+    if isinstance(value, date):
+        # Convert to datetime at midnight
+        return (dt.combine(value, dt.min.time()).isoformat(), "day")
+
+    # String - detect if it has time component
+    if isinstance(value, str):
+        # ISO 8601 datetime with time component (has 'T' and time)
+        if 'T' in value:
+            return (value, "hour")
+        # Date-only string
+        else:
+            return (value, "day")
+
+    raise ValueError(
+        f"Invalid date value. Expected datetime object, date object, or ISO 8601 string. "
         f"Got: {type(value).__name__}"
     )

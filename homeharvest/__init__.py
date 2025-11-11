@@ -1,11 +1,11 @@
 import warnings
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from .core.scrapers import ScraperInput
 from .utils import (
     process_result, ordered_properties, validate_input, validate_dates, validate_limit,
     validate_offset, validate_datetime, validate_filters, validate_sort, validate_last_update_filters,
-    convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days
+    convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days, detect_precision_and_convert
 )
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
@@ -20,8 +20,8 @@ def scrape_property(
     mls_only: bool = False,
     past_days: int | timedelta = None,
     proxy: str = None,
-    date_from: str = None,
-    date_to: str = None,
+    date_from: datetime | date | str = None,
+    date_to: datetime | date | str = None,
     foreclosure: bool = None,
     extra_property_data: bool = True,
     exclude_pending: bool = False,
@@ -29,8 +29,6 @@ def scrape_property(
     offset: int = 0,
     # New date/time filtering parameters
     past_hours: int | timedelta = None,
-    datetime_from: datetime | str = None,
-    datetime_to: datetime | str = None,
     # New last_update_date filtering parameters
     updated_since: datetime | str = None,
     updated_in_past_hours: int | timedelta = None,
@@ -67,7 +65,13 @@ def scrape_property(
         - PENDING: Filters by pending_date. Contingent properties without pending_date are included.
         - SOLD: Filters by sold_date (when property was sold)
         - FOR_SALE/FOR_RENT: Filters by list_date (when property was listed)
-    :param date_from, date_to: Get properties sold or listed (dependent on your listing_type) between these dates. format: 2021-01-28
+    :param date_from, date_to: Get properties sold or listed (dependent on your listing_type) between these dates.
+        Accepts multiple formats for flexible precision:
+        - Date strings: "2025-01-20" (day-level precision)
+        - Datetime strings: "2025-01-20T14:30:00" (hour-level precision)
+        - date objects: date(2025, 1, 20) (day-level precision)
+        - datetime objects: datetime(2025, 1, 20, 14, 30) (hour-level precision)
+        The precision is automatically detected based on the input format.
     :param foreclosure: If set, fetches only foreclosure listings.
     :param extra_property_data: Increases requests by O(n). If set, this fetches additional property data (e.g. agent, broker, property evaluations etc.)
     :param exclude_pending: If true, this excludes pending or contingent properties from the results, unless listing type is pending.
@@ -76,7 +80,6 @@ def scrape_property(
 
     New parameters:
     :param past_hours: Get properties in the last _ hours (requires client-side filtering). Accepts int or timedelta.
-    :param datetime_from, datetime_to: Precise time filtering. Accepts datetime objects or ISO 8601 strings (e.g. "2025-01-20T14:30:00")
     :param updated_since: Filter by last_update_date (when property was last updated). Accepts datetime object or ISO 8601 string (client-side filtering)
     :param updated_in_past_hours: Filter by properties updated in the last _ hours. Accepts int or timedelta (client-side filtering)
     :param beds_min, beds_max: Filter by number of bedrooms
@@ -91,11 +94,8 @@ def scrape_property(
     Note: past_days and past_hours also accept timedelta objects for more Pythonic usage.
     """
     validate_input(listing_type)
-    validate_dates(date_from, date_to)
     validate_limit(limit)
     validate_offset(offset, limit)
-    validate_datetime(datetime_from)
-    validate_datetime(datetime_to)
     validate_filters(
         beds_min, beds_max, baths_min, baths_max, sqft_min, sqft_max,
         price_min, price_max, lot_sqft_min, lot_sqft_max, year_built_min, year_built_max
@@ -116,11 +116,16 @@ def scrape_property(
     else:
         converted_listing_type = ListingType(listing_type.upper())
 
+    # Convert date_from/date_to with precision detection
+    converted_date_from, date_from_precision = detect_precision_and_convert(date_from)
+    converted_date_to, date_to_precision = detect_precision_and_convert(date_to)
+
+    # Validate converted dates
+    validate_dates(converted_date_from, converted_date_to)
+
     # Convert datetime/timedelta objects to appropriate formats
     converted_past_days = extract_timedelta_days(past_days)
     converted_past_hours = extract_timedelta_hours(past_hours)
-    converted_datetime_from = convert_to_datetime_string(datetime_from)
-    converted_datetime_to = convert_to_datetime_string(datetime_to)
     converted_updated_since = convert_to_datetime_string(updated_since)
     converted_updated_in_past_hours = extract_timedelta_hours(updated_in_past_hours)
 
@@ -133,8 +138,10 @@ def scrape_property(
         radius=radius,
         mls_only=mls_only,
         last_x_days=converted_past_days,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=converted_date_from,
+        date_to=converted_date_to,
+        date_from_precision=date_from_precision,
+        date_to_precision=date_to_precision,
         foreclosure=foreclosure,
         extra_property_data=extra_property_data,
         exclude_pending=exclude_pending,
@@ -142,8 +149,6 @@ def scrape_property(
         offset=offset,
         # New date/time filtering
         past_hours=converted_past_hours,
-        datetime_from=converted_datetime_from,
-        datetime_to=converted_datetime_to,
         # New last_update_date filtering
         updated_since=converted_updated_since,
         updated_in_past_hours=converted_updated_in_past_hours,

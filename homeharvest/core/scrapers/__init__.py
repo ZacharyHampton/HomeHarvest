@@ -21,6 +21,8 @@ class ScraperInput(BaseModel):
     last_x_days: int | None = None
     date_from: str | None = None
     date_to: str | None = None
+    date_from_precision: str | None = None  # "day" or "hour"
+    date_to_precision: str | None = None    # "day" or "hour"
     foreclosure: bool | None = False
     extra_property_data: bool | None = True
     exclude_pending: bool | None = False
@@ -30,8 +32,6 @@ class ScraperInput(BaseModel):
 
     # New date/time filtering parameters
     past_hours: int | None = None
-    datetime_from: str | None = None
-    datetime_to: str | None = None
 
     # New last_update_date filtering parameters
     updated_since: str | None = None
@@ -107,6 +107,8 @@ class Scraper:
         self.mls_only = scraper_input.mls_only
         self.date_from = scraper_input.date_from
         self.date_to = scraper_input.date_to
+        self.date_from_precision = scraper_input.date_from_precision
+        self.date_to_precision = scraper_input.date_to_precision
         self.foreclosure = scraper_input.foreclosure
         self.extra_property_data = scraper_input.extra_property_data
         self.exclude_pending = scraper_input.exclude_pending
@@ -116,8 +118,6 @@ class Scraper:
 
         # New date/time filtering
         self.past_hours = scraper_input.past_hours
-        self.datetime_from = scraper_input.datetime_from
-        self.datetime_to = scraper_input.datetime_to
 
         # New last_update_date filtering
         self.updated_since = scraper_input.updated_since

@@ -164,23 +164,26 @@ class RealtorScraper(Scraper):
 
         # Build date parameter (expand to full days if hour-based filtering is used)
         if date_field:
-            if self.datetime_from or self.datetime_to:
+            # Check if we have hour precision (need to extract date part for API, then filter client-side)
+            has_hour_precision = (self.date_from_precision == "hour" or self.date_to_precision == "hour")
+
+            if has_hour_precision and (self.date_from or self.date_to):
                 # Hour-based datetime filtering: extract date parts for API, client-side filter by hours
                 from datetime import datetime
 
                 min_date = None
                 max_date = None
 
-                if self.datetime_from:
+                if self.date_from:
                     try:
-                        dt_from = datetime.fromisoformat(self.datetime_from.replace('Z', '+00:00'))
+                        dt_from = datetime.fromisoformat(self.date_from.replace('Z', '+00:00'))
                         min_date = dt_from.strftime("%Y-%m-%d")
                     except (ValueError, AttributeError):
                         pass
 
-                if self.datetime_to:
+                if self.date_to:
                     try:
-                        dt_to = datetime.fromisoformat(self.datetime_to.replace('Z', '+00:00'))
+                        dt_to = datetime.fromisoformat(self.date_to.replace('Z', '+00:00'))
                         max_date = dt_to.strftime("%Y-%m-%d")
                     except (ValueError, AttributeError):
                         pass
@@ -551,7 +554,8 @@ class RealtorScraper(Scraper):
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)
-        if self.past_hours or self.datetime_from or self.datetime_to:
+        has_hour_precision = (self.date_from_precision == "hour" or self.date_to_precision == "hour")
+        if self.past_hours or has_hour_precision:
             homes = self._apply_hour_based_date_filter(homes)
         # Apply client-side date filtering for PENDING properties
         # (server-side filters are broken in the API)
@@ -577,7 +581,7 @@ class RealtorScraper(Scraper):
     def _apply_hour_based_date_filter(self, homes):
         """Apply client-side hour-based date filtering for all listing types.
 
-        This is used when past_hours, datetime_from, or datetime_to are specified,
+        This is used when past_hours or date_from/date_to have hour precision,
         since the API only supports day-level filtering.
         """
         if not homes:
@@ -591,17 +595,17 @@ class RealtorScraper(Scraper):
         if self.past_hours:
             cutoff_datetime = datetime.now() - timedelta(hours=self.past_hours)
             date_range = {'type': 'since', 'date': cutoff_datetime}
-        elif self.datetime_from or self.datetime_to:
+        elif self.date_from or self.date_to:
             try:
                 from_datetime = None
                 to_datetime = None
 
-                if self.datetime_from:
-                    from_datetime_str = self.datetime_from.replace('Z', '+00:00') if self.datetime_from.endswith('Z') else self.datetime_from
+                if self.date_from:
+                    from_datetime_str = self.date_from.replace('Z', '+00:00') if self.date_from.endswith('Z') else self.date_from
                     from_datetime = datetime.fromisoformat(from_datetime_str).replace(tzinfo=None)
 
-                if self.datetime_to:
-                    to_datetime_str = self.datetime_to.replace('Z', '+00:00') if self.datetime_to.endswith('Z') else self.datetime_to
+                if self.date_to:
+                    to_datetime_str = self.date_to.replace('Z', '+00:00') if self.date_to.endswith('Z') else self.date_to
                     to_datetime = datetime.fromisoformat(to_datetime_str).replace(tzinfo=None)
 
                 if from_datetime and to_datetime:
