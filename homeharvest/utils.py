@@ -171,27 +171,31 @@ def validate_input(listing_type: str | list[str] | None) -> None:
 
 
 def validate_dates(date_from: str | None, date_to: str | None) -> None:
-    if isinstance(date_from, str) != isinstance(date_to, str):
-        raise InvalidDate("Both date_from and date_to must be provided together.")
-
-    if date_from and date_to:
-        try:
-            # Use fromisoformat to accept both date and datetime strings
+    # Allow either date_from or date_to individually, or both together
+    try:
+        # Validate and parse date_from if provided
+        date_from_obj = None
+        if date_from:
             date_from_str = date_from.replace('Z', '+00:00') if date_from.endswith('Z') else date_from
-            date_to_str = date_to.replace('Z', '+00:00') if date_to.endswith('Z') else date_to
-
             date_from_obj = datetime.fromisoformat(date_from_str)
+
+        # Validate and parse date_to if provided
+        date_to_obj = None
+        if date_to:
+            date_to_str = date_to.replace('Z', '+00:00') if date_to.endswith('Z') else date_to
             date_to_obj = datetime.fromisoformat(date_to_str)
 
-            if date_to_obj < date_from_obj:
-                raise InvalidDate(f"date_to ('{date_to}') must be after date_from ('{date_from}').")
-        except ValueError as e:
-            # Provide specific guidance on the expected format
-            raise InvalidDate(
-                f"Invalid date format. Expected ISO 8601 format. "
-                f"Examples: '2025-01-20' (date only) or '2025-01-20T14:30:00' (with time). "
-                f"Got: date_from='{date_from}', date_to='{date_to}'. Error: {e}"
-            )
+        # If both provided, ensure date_to is after date_from
+        if date_from_obj and date_to_obj and date_to_obj < date_from_obj:
+            raise InvalidDate(f"date_to ('{date_to}') must be after date_from ('{date_from}').")
+
+    except ValueError as e:
+        # Provide specific guidance on the expected format
+        raise InvalidDate(
+            f"Invalid date format. Expected ISO 8601 format. "
+            f"Examples: '2025-01-20' (date only) or '2025-01-20T14:30:00' (with time). "
+            f"Got: date_from='{date_from}', date_to='{date_to}'. Error: {e}"
+        )
 
 
 def validate_limit(limit: int) -> None:
