@@ -129,6 +129,22 @@ def scrape_property(
     converted_updated_since = convert_to_datetime_string(updated_since)
     converted_updated_in_past_hours = extract_timedelta_hours(updated_in_past_hours)
 
+    # Auto-apply optimal sort for time-based filters (unless user specified different sort)
+    if (converted_updated_since or converted_updated_in_past_hours) and not sort_by:
+        sort_by = "last_update_date"
+        if not sort_direction:
+            sort_direction = "desc"  # Most recent first
+
+    # Auto-apply optimal sort for PENDING listings with date filters
+    # PENDING API filtering is broken, so we rely on client-side filtering
+    # Sorting by pending_date ensures efficient pagination with early termination
+    elif (converted_listing_type == ListingType.PENDING and
+          (converted_past_days or converted_past_hours or converted_date_from) and
+          not sort_by):
+        sort_by = "pending_date"
+        if not sort_direction:
+            sort_direction = "desc"  # Most recent first
+
     scraper_input = ScraperInput(
         location=location,
         listing_type=converted_listing_type,

@@ -526,31 +526,39 @@ class RealtorScraper(Scraper):
         total = result["total"]
         homes = result["properties"]
 
-        with ThreadPoolExecutor() as executor:
-            # Store futures with their offsets to maintain proper sort order
-            # Start from offset + page_size and go up to offset + limit
-            futures_with_offsets = [
-                (i, executor.submit(
-                    self.general_search,
-                    variables=search_variables | {"offset": i},
-                    search_type=search_type,
-                ))
-                for i in range(
-                    self.offset + self.DEFAULT_PAGE_SIZE,
-                    min(total, self.offset + self.limit),
-                    self.DEFAULT_PAGE_SIZE,
-                )
-            ]
+        # Pre-check: Should we continue pagination?
+        # This optimization prevents unnecessary API calls when using time-based filters
+        # with date sorting. If page 1's last property is outside the time window,
+        # all future pages will also be outside (due to sort order).
+        should_continue_pagination = self._should_fetch_more_pages(homes)
 
-            # Collect results and sort by offset to preserve API sort order across pages
-            results = []
-            for offset, future in futures_with_offsets:
-                results.append((offset, future.result()["properties"]))
+        # Only launch parallel pagination if needed
+        if should_continue_pagination and self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit):
+            with ThreadPoolExecutor() as executor:
+                # Store futures with their offsets to maintain proper sort order
+                # Start from offset + page_size and go up to offset + limit
+                futures_with_offsets = [
+                    (i, executor.submit(
+                        self.general_search,
+                        variables=search_variables | {"offset": i},
+                        search_type=search_type,
+                    ))
+                    for i in range(
+                        self.offset + self.DEFAULT_PAGE_SIZE,
+                        min(total, self.offset + self.limit),
+                        self.DEFAULT_PAGE_SIZE,
+                    )
+                ]
 
-            # Sort by offset and concatenate in correct order
-            results.sort(key=lambda x: x[0])
-            for offset, properties in results:
-                homes.extend(properties)
+                # Collect results and sort by offset to preserve API sort order across pages
+                results = []
+                for offset, future in futures_with_offsets:
+                    results.append((offset, future.result()["properties"]))
+
+                # Sort by offset and concatenate in correct order
+                results.sort(key=lambda x: x[0])
+                for offset, properties in results:
+                    homes.extend(properties)
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)
@@ -843,6 +851,71 @@ class RealtorScraper(Scraper):
         elif date_range['type'] == 'range':
             return date_range['from_date'] <= date_obj <= date_range['to_date']
         return False
+
+    def _should_fetch_more_pages(self, first_page):
+        """Determine if we should continue pagination based on first page results.
+
+        This optimization prevents unnecessary API calls when using time-based filters
+        with date sorting. If the last property on page 1 is already outside the time
+        window, all future pages will also be outside (due to sort order).
+
+        Args:
+            first_page: List of properties from the first page
+
+        Returns:
+            bool: True if we should continue pagination, False to stop early
+        """
+        from datetime import datetime, timedelta
+
+        # Check for last_update_date filters
+        if (self.updated_since or self.updated_in_past_hours) and self.sort_by == "last_update_date":
+            if not first_page:
+                return False
+
+            last_property = first_page[-1]
+            last_date = self._extract_date_from_home(last_property, 'last_update_date')
+
+            if not last_date:
+                return True
+
+            # Build date range for last_update_date filter
+            if self.updated_since:
+                try:
+                    cutoff_datetime = datetime.fromisoformat(self.updated_since.replace('Z', '+00:00') if self.updated_since.endswith('Z') else self.updated_since)
+                    date_range = {'type': 'since', 'date': cutoff_datetime}
+                except ValueError:
+                    return True
+            elif self.updated_in_past_hours:
+                cutoff_datetime = datetime.now() - timedelta(hours=self.updated_in_past_hours)
+                date_range = {'type': 'since', 'date': cutoff_datetime}
+            else:
+                return True
+
+            return self._is_datetime_in_range(last_date, date_range)
+
+        # Check for PENDING date filters
+        if (self.listing_type == ListingType.PENDING and
+            (self.last_x_days or self.past_hours or self.date_from) and
+            self.sort_by == "pending_date"):
+
+            if not first_page:
+                return False
+
+            last_property = first_page[-1]
+            last_date = self._extract_date_from_home(last_property, 'pending_date')
+
+            if not last_date:
+                return True
+
+            # Build date range for pending date filter
+            date_range = self._get_date_range()
+            if not date_range:
+                return True
+
+            return self._is_datetime_in_range(last_date, date_range)
+
+        # No optimization applicable, continue pagination
+        return True
 
     def _apply_sort(self, homes):
         """Apply client-side sorting to ensure results are properly ordered.

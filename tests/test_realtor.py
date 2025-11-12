@@ -1358,3 +1358,170 @@ def test_combined_filters_with_raw_data():
 
         assert mls_id is not None and mls_id != "", \
             f"Property {prop.get('property_id')} should have an MLS ID (source.id)"
+
+
+def test_updated_since_filtering():
+    """Test the updated_since parameter for filtering by last_update_date"""
+    from datetime import datetime, timedelta
+
+    # Test 1: Filter by last update in past 10 minutes (user's example)
+    cutoff_time = datetime.now() - timedelta(minutes=10)
+    result_10min = scrape_property(
+        location="California",
+        updated_since=cutoff_time,
+        sort_by="last_update_date",
+        sort_direction="desc",
+        limit=100
+    )
+
+    assert result_10min is not None
+    print(f"\n10-minute window returned {len(result_10min)} properties")
+
+    # Test 2: Verify all results have last_update_date within range
+    if len(result_10min) > 0:
+        for idx in range(min(10, len(result_10min))):
+            update_date_str = result_10min.iloc[idx]["last_update_date"]
+            if pd.notna(update_date_str):
+                try:
+                    # Handle timezone-aware datetime strings
+                    date_str = str(update_date_str)
+                    if '+' in date_str or date_str.endswith('Z'):
+                        # Remove timezone for comparison with naive cutoff_time
+                        date_str = date_str.replace('+00:00', '').replace('Z', '')
+                    update_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+
+                    assert update_date >= cutoff_time, \
+                        f"Property last_update_date {update_date} should be >= {cutoff_time}"
+                    print(f"Property {idx}: last_update_date = {update_date} (valid)")
+                except (ValueError, TypeError) as e:
+                    print(f"Warning: Could not parse date {update_date_str}: {e}")
+
+    # Test 3: Compare different time windows
+    result_1hour = scrape_property(
+        location="California",
+        updated_since=datetime.now() - timedelta(hours=1),
+        limit=50
+    )
+
+    result_24hours = scrape_property(
+        location="California",
+        updated_since=datetime.now() - timedelta(hours=24),
+        limit=50
+    )
+
+    print(f"1-hour window: {len(result_1hour)} properties")
+    print(f"24-hour window: {len(result_24hours)} properties")
+
+    # Longer time window should return same or more results
+    if len(result_1hour) > 0 and len(result_24hours) > 0:
+        assert len(result_1hour) <= len(result_24hours), \
+            "1-hour filter should return <= 24-hour results"
+
+    # Test 4: Verify sorting works with filtering
+    if len(result_10min) > 1:
+        # Get non-null dates
+        dates = []
+        for idx in range(len(result_10min)):
+            date_str = result_10min.iloc[idx]["last_update_date"]
+            if pd.notna(date_str):
+                try:
+                    # Handle timezone-aware datetime strings
+                    clean_date_str = str(date_str)
+                    if '+' in clean_date_str or clean_date_str.endswith('Z'):
+                        clean_date_str = clean_date_str.replace('+00:00', '').replace('Z', '')
+                    dates.append(datetime.strptime(clean_date_str, "%Y-%m-%d %H:%M:%S"))
+                except (ValueError, TypeError):
+                    pass
+
+        if len(dates) > 1:
+            # Check if sorted descending
+            for i in range(len(dates) - 1):
+                assert dates[i] >= dates[i + 1], \
+                    f"Results should be sorted by last_update_date descending: {dates[i]} >= {dates[i+1]}"
+
+
+def test_updated_since_optimization():
+    """Test that updated_since optimization works (auto-sort + early termination)"""
+    from datetime import datetime, timedelta
+    import time
+
+    # Test 1: Verify auto-sort is applied when using updated_since without explicit sort
+    start_time = time.time()
+    result = scrape_property(
+        location="California",
+        updated_since=datetime.now() - timedelta(minutes=5),
+        # NO sort_by specified - should auto-apply sort_by="last_update_date"
+        limit=50
+    )
+    elapsed_time = time.time() - start_time
+
+    print(f"\nAuto-sort test: {len(result)} properties in {elapsed_time:.2f}s")
+
+    # Should complete quickly due to early termination optimization (<5 seconds)
+    assert elapsed_time < 5.0, f"Query should be fast with optimization, took {elapsed_time:.2f}s"
+
+    # Verify results are sorted by last_update_date (proving auto-sort worked)
+    if len(result) > 1:
+        dates = []
+        for idx in range(min(10, len(result))):
+            date_str = result.iloc[idx]["last_update_date"]
+            if pd.notna(date_str):
+                try:
+                    clean_date_str = str(date_str)
+                    if '+' in clean_date_str or clean_date_str.endswith('Z'):
+                        clean_date_str = clean_date_str.replace('+00:00', '').replace('Z', '')
+                    dates.append(datetime.strptime(clean_date_str, "%Y-%m-%d %H:%M:%S"))
+                except (ValueError, TypeError):
+                    pass
+
+        if len(dates) > 1:
+            # Verify descending order (most recent first)
+            for i in range(len(dates) - 1):
+                assert dates[i] >= dates[i + 1], \
+                    "Auto-applied sort should order by last_update_date descending"
+
+    print("Auto-sort optimization verified ✓")
+
+
+def test_pending_date_optimization():
+    """Test that PENDING + date filters get auto-sort and early termination"""
+    from datetime import datetime, timedelta
+    import time
+
+    # Test: Verify auto-sort is applied for PENDING with past_days
+    start_time = time.time()
+    result = scrape_property(
+        location="California",
+        listing_type="pending",
+        past_days=7,
+        # NO sort_by specified - should auto-apply sort_by="pending_date"
+        limit=50
+    )
+    elapsed_time = time.time() - start_time
+
+    print(f"\nPENDING auto-sort test: {len(result)} properties in {elapsed_time:.2f}s")
+
+    # Should complete quickly due to optimization (<10 seconds)
+    assert elapsed_time < 10.0, f"PENDING query should be fast with optimization, took {elapsed_time:.2f}s"
+
+    # Verify results are sorted by pending_date (proving auto-sort worked)
+    if len(result) > 1:
+        dates = []
+        for idx in range(min(10, len(result))):
+            date_str = result.iloc[idx]["pending_date"]
+            if pd.notna(date_str):
+                try:
+                    clean_date_str = str(date_str)
+                    if '+' in clean_date_str or clean_date_str.endswith('Z'):
+                        clean_date_str = clean_date_str.replace('+00:00', '').replace('Z', '')
+                    dates.append(datetime.strptime(clean_date_str, "%Y-%m-%d %H:%M:%S"))
+                except (ValueError, TypeError):
+                    pass
+
+        if len(dates) > 1:
+            # Verify descending order (most recent first)
+            for i in range(len(dates) - 1):
+                assert dates[i] >= dates[i + 1], \
+                    "PENDING auto-applied sort should order by pending_date descending"
+
+    print("PENDING optimization verified ✓")
