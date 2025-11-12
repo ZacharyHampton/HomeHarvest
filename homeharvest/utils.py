@@ -331,15 +331,26 @@ def validate_sort(sort_by: str | None, sort_direction: str | None = "desc") -> N
 
 def convert_to_datetime_string(value) -> str | None:
     """
-    Convert datetime object or string to ISO 8601 string format.
+    Convert datetime object or string to ISO 8601 string format with UTC timezone.
 
     Accepts:
-    - datetime.datetime objects
-    - datetime.date objects
+    - datetime.datetime objects (naive or timezone-aware)
+      - Naive datetimes are treated as local time and converted to UTC
+      - Timezone-aware datetimes are converted to UTC
+    - datetime.date objects (treated as midnight UTC)
     - ISO 8601 strings (returned as-is)
     - None (returns None)
 
-    Returns ISO 8601 formatted string or None.
+    Returns ISO 8601 formatted string with UTC timezone or None.
+
+    Examples:
+        >>> # Naive datetime (treated as local time)
+        >>> convert_to_datetime_string(datetime(2025, 1, 20, 14, 30))
+        '2025-01-20T22:30:00+00:00'  # Assuming PST (UTC-8)
+
+        >>> # Timezone-aware datetime
+        >>> convert_to_datetime_string(datetime(2025, 1, 20, 14, 30, tzinfo=timezone.utc))
+        '2025-01-20T14:30:00+00:00'
     """
     if value is None:
         return None
@@ -349,13 +360,23 @@ def convert_to_datetime_string(value) -> str | None:
         return value
 
     # datetime.datetime object
-    from datetime import datetime, date
+    from datetime import datetime, date, timezone
     if isinstance(value, datetime):
-        return value.isoformat()
+        # Handle naive datetime - treat as local time and convert to UTC
+        if value.tzinfo is None:
+            # Convert naive datetime to aware local time, then to UTC
+            local_aware = value.astimezone()
+            utc_aware = local_aware.astimezone(timezone.utc)
+            return utc_aware.isoformat()
+        else:
+            # Already timezone-aware, convert to UTC
+            utc_aware = value.astimezone(timezone.utc)
+            return utc_aware.isoformat()
 
-    # datetime.date object (convert to datetime at midnight)
+    # datetime.date object (convert to datetime at midnight UTC)
     if isinstance(value, date):
-        return datetime.combine(value, datetime.min.time()).isoformat()
+        utc_datetime = datetime.combine(value, datetime.min.time()).replace(tzinfo=timezone.utc)
+        return utc_datetime.isoformat()
 
     raise ValueError(
         f"Invalid datetime value. Expected datetime object, date object, or ISO 8601 string. "

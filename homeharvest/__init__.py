@@ -72,6 +72,8 @@ def scrape_property(
         - date objects: date(2025, 1, 20) (day-level precision)
         - datetime objects: datetime(2025, 1, 20, 14, 30) (hour-level precision)
         The precision is automatically detected based on the input format.
+        Timezone handling: Naive datetimes are treated as local time and automatically converted to UTC.
+        Timezone-aware datetimes are converted to UTC. For best results, use timezone-aware datetimes.
     :param foreclosure: If set, fetches only foreclosure listings.
     :param extra_property_data: Increases requests by O(n). If set, this fetches additional property data (e.g. agent, broker, property evaluations etc.)
     :param exclude_pending: If true, this excludes pending or contingent properties from the results, unless listing type is pending.
@@ -80,7 +82,11 @@ def scrape_property(
 
     New parameters:
     :param past_hours: Get properties in the last _ hours (requires client-side filtering). Accepts int or timedelta.
-    :param updated_since: Filter by last_update_date (when property was last updated). Accepts datetime object or ISO 8601 string (client-side filtering)
+    :param updated_since: Filter by last_update_date (when property was last updated). Accepts datetime object or ISO 8601 string (client-side filtering).
+        Timezone handling: Naive datetimes (like datetime.now()) are treated as local time and automatically converted to UTC.
+        Timezone-aware datetimes are converted to UTC. Examples:
+        - datetime.now() - uses your local timezone
+        - datetime.now(timezone.utc) - uses UTC explicitly
     :param updated_in_past_hours: Filter by properties updated in the last _ hours. Accepts int or timedelta (client-side filtering)
     :param beds_min, beds_max: Filter by number of bedrooms
     :param baths_min, baths_max: Filter by number of bathrooms

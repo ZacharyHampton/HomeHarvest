@@ -755,13 +755,14 @@ class RealtorScraper(Scraper):
         if not homes:
             return homes
 
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Determine date range for last_update_date filtering
         date_range = None
 
         if self.updated_in_past_hours:
-            cutoff_datetime = datetime.now() - timedelta(hours=self.updated_in_past_hours)
+            # Use UTC now, strip timezone to match naive property dates
+            cutoff_datetime = (datetime.now(timezone.utc) - timedelta(hours=self.updated_in_past_hours)).replace(tzinfo=None)
             date_range = {'type': 'since', 'date': cutoff_datetime}
         elif self.updated_since:
             try:
@@ -792,15 +793,19 @@ class RealtorScraper(Scraper):
 
     def _get_date_range(self):
         """Get the date range for filtering based on instance parameters."""
-        from datetime import datetime, timedelta
-        
+        from datetime import datetime, timedelta, timezone
+
         if self.last_x_days:
-            cutoff_date = datetime.now() - timedelta(days=self.last_x_days)
+            # Use UTC now, strip timezone to match naive property dates
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=self.last_x_days)).replace(tzinfo=None)
             return {'type': 'since', 'date': cutoff_date}
         elif self.date_from and self.date_to:
             try:
-                from_date = datetime.fromisoformat(self.date_from)
-                to_date = datetime.fromisoformat(self.date_to)
+                # Parse and strip timezone to match naive property dates
+                from_date_str = self.date_from.replace('Z', '+00:00') if self.date_from.endswith('Z') else self.date_from
+                to_date_str = self.date_to.replace('Z', '+00:00') if self.date_to.endswith('Z') else self.date_to
+                from_date = datetime.fromisoformat(from_date_str).replace(tzinfo=None)
+                to_date = datetime.fromisoformat(to_date_str).replace(tzinfo=None)
                 return {'type': 'range', 'from_date': from_date, 'to_date': to_date}
             except ValueError:
                 return None
@@ -865,7 +870,7 @@ class RealtorScraper(Scraper):
         Returns:
             bool: True if we should continue pagination, False to stop early
         """
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Check for last_update_date filters
         if (self.updated_since or self.updated_in_past_hours) and self.sort_by == "last_update_date":
@@ -882,11 +887,14 @@ class RealtorScraper(Scraper):
             if self.updated_since:
                 try:
                     cutoff_datetime = datetime.fromisoformat(self.updated_since.replace('Z', '+00:00') if self.updated_since.endswith('Z') else self.updated_since)
+                    # Strip timezone to match naive datetimes from _parse_date_value
+                    cutoff_datetime = cutoff_datetime.replace(tzinfo=None)
                     date_range = {'type': 'since', 'date': cutoff_datetime}
                 except ValueError:
                     return True
             elif self.updated_in_past_hours:
-                cutoff_datetime = datetime.now() - timedelta(hours=self.updated_in_past_hours)
+                # Use UTC now, strip timezone to match naive property dates
+                cutoff_datetime = (datetime.now(timezone.utc) - timedelta(hours=self.updated_in_past_hours)).replace(tzinfo=None)
                 date_range = {'type': 'since', 'date': cutoff_datetime}
             else:
                 return True
@@ -935,6 +943,8 @@ class RealtorScraper(Scraper):
 
         def get_sort_key(home):
             """Extract the sort field value from a home (handles both dict and Property object)."""
+            from datetime import datetime
+
             if isinstance(home, dict):
                 value = home.get(self.sort_by)
             else:
@@ -950,20 +960,23 @@ class RealtorScraper(Scraper):
             if self.sort_by in ['list_date', 'sold_date', 'pending_date', 'last_update_date']:
                 if isinstance(value, str):
                     try:
-                        from datetime import datetime
                         # Handle timezone indicators
                         date_value = value
                         if date_value.endswith('Z'):
                             date_value = date_value[:-1] + '+00:00'
                         parsed_date = datetime.fromisoformat(date_value)
-                        return (0, parsed_date)
+                        # Normalize to timezone-naive for consistent comparison
+                        return 0, parsed_date.replace(tzinfo=None)
                     except (ValueError, AttributeError):
                         # If parsing fails, treat as None
                         return (1, 0) if self.sort_direction == "desc" else (1, float('inf'))
-                return (0, value)
+                # Handle datetime objects directly (normalize timezone)
+                if isinstance(value, datetime):
+                    return 0, value.replace(tzinfo=None)
+                return 0, value
 
             # For numeric fields, ensure we can compare
-            return (0, value)
+            return 0, value
 
         # Sort the homes
         reverse = (self.sort_direction == "desc")

@@ -1,3 +1,5 @@
+import pytz
+
 from homeharvest import scrape_property, Property
 import pandas as pd
 
@@ -1525,3 +1527,70 @@ def test_pending_date_optimization():
                     "PENDING auto-applied sort should order by pending_date descending"
 
     print("PENDING optimization verified ✓")
+
+
+def test_basic_last_update_date():
+    from datetime import datetime, timedelta
+
+    # Test with naive datetime (treated as local time)
+    now = datetime.now()
+
+    properties = scrape_property(
+        "California",
+        updated_since=now - timedelta(minutes=10),
+        sort_by="last_update_date",
+        sort_direction="desc"
+    )
+
+    # Convert now to timezone-aware for comparison with UTC dates in DataFrame
+    now_utc = now.astimezone(tz=pytz.timezone("UTC"))
+
+    # Check all last_update_date values are <= now
+    assert (properties["last_update_date"] <= now_utc).all()
+
+    # Verify we got some results
+    assert len(properties) > 0
+
+
+def test_timezone_aware_last_update_date():
+    """Test that timezone-aware datetimes work correctly for updated_since"""
+    from datetime import datetime, timedelta, timezone
+
+    # Test with timezone-aware datetime (explicit UTC)
+    now_utc = datetime.now(timezone.utc)
+
+    properties = scrape_property(
+        "California",
+        updated_since=now_utc - timedelta(minutes=10),
+        sort_by="last_update_date",
+        sort_direction="desc"
+    )
+
+    # Check all last_update_date values are <= now
+    assert (properties["last_update_date"] <= now_utc).all()
+
+    # Verify we got some results
+    assert len(properties) > 0
+
+
+def test_timezone_handling_date_range():
+    """Test timezone handling for date_from and date_to parameters"""
+    from datetime import datetime, timedelta
+
+    # Test with naive datetimes for date range (PENDING properties)
+    now = datetime.now()
+    three_days_ago = now - timedelta(days=3)
+
+    properties = scrape_property(
+        "California",
+        listing_type="pending",
+        date_from=three_days_ago,
+        date_to=now
+    )
+
+    # Verify we got results and they're within the date range
+    if len(properties) > 0:
+        # Convert now to UTC for comparison
+        now_utc = now.astimezone(tz=pytz.timezone("UTC"))
+        assert (properties["pending_date"] <= now_utc).all()
+
