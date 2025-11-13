@@ -48,6 +48,8 @@ def scrape_property(
     # New sorting parameters
     sort_by: str = None,
     sort_direction: str = "desc",
+    # Pagination control
+    parallel: bool = True,
 ) -> Union[pd.DataFrame, list[dict], list[Property]]:
     """
     Scrape properties from Realtor.com based on a given location and listing type.
@@ -96,6 +98,9 @@ def scrape_property(
     :param year_built_min, year_built_max: Filter by year built
     :param sort_by: Sort results by field (list_date, sold_date, list_price, sqft, beds, baths, last_update_date)
     :param sort_direction: Sort direction (asc, desc)
+    :param parallel: Controls pagination strategy. True (default) = fetch all pages in parallel for maximum speed.
+        False = fetch pages sequentially with early termination checks (useful for rate limiting or narrow time windows).
+        Sequential mode will stop paginating as soon as time-based filters indicate no more matches are possible.
 
     Note: past_days and past_hours also accept timedelta objects for more Pythonic usage.
     """
@@ -190,6 +195,8 @@ def scrape_property(
         # New sorting
         sort_by=sort_by,
         sort_direction=sort_direction,
+        # Pagination control
+        parallel=parallel,
     )
 
     site = RealtorScraper(scraper_input)

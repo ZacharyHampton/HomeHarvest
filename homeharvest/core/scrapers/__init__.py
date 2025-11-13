@@ -55,6 +55,9 @@ class ScraperInput(BaseModel):
     sort_by: str | None = None
     sort_direction: str = "desc"
 
+    # Pagination control
+    parallel: bool = True
+
 
 class Scraper:
     session = None
@@ -140,6 +143,9 @@ class Scraper:
         # New sorting
         self.sort_by = scraper_input.sort_by
         self.sort_direction = scraper_input.sort_direction
+
+        # Pagination control
+        self.parallel = scraper_input.parallel
 
     def search(self) -> list[Union[Property | dict]]: ...
 

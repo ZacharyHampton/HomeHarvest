@@ -526,39 +526,49 @@ class RealtorScraper(Scraper):
         total = result["total"]
         homes = result["properties"]
 
-        # Pre-check: Should we continue pagination?
-        # This optimization prevents unnecessary API calls when using time-based filters
-        # with date sorting. If page 1's last property is outside the time window,
-        # all future pages will also be outside (due to sort order).
-        should_continue_pagination = self._should_fetch_more_pages(homes)
+        # Fetch remaining pages based on parallel parameter
+        if self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit):
+            if self.parallel:
+                # Parallel mode: Fetch all remaining pages in parallel
+                with ThreadPoolExecutor() as executor:
+                    futures_with_offsets = [
+                        (i, executor.submit(
+                            self.general_search,
+                            variables=search_variables | {"offset": i},
+                            search_type=search_type,
+                        ))
+                        for i in range(
+                            self.offset + self.DEFAULT_PAGE_SIZE,
+                            min(total, self.offset + self.limit),
+                            self.DEFAULT_PAGE_SIZE,
+                        )
+                    ]
 
-        # Only launch parallel pagination if needed
-        if should_continue_pagination and self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit):
-            with ThreadPoolExecutor() as executor:
-                # Store futures with their offsets to maintain proper sort order
-                # Start from offset + page_size and go up to offset + limit
-                futures_with_offsets = [
-                    (i, executor.submit(
-                        self.general_search,
-                        variables=search_variables | {"offset": i},
+                    # Collect results and sort by offset to preserve API sort order
+                    results = []
+                    for offset, future in futures_with_offsets:
+                        results.append((offset, future.result()["properties"]))
+
+                    results.sort(key=lambda x: x[0])
+                    for offset, properties in results:
+                        homes.extend(properties)
+            else:
+                # Sequential mode: Fetch pages one by one with early termination checks
+                for current_offset in range(
+                    self.offset + self.DEFAULT_PAGE_SIZE,
+                    min(total, self.offset + self.limit),
+                    self.DEFAULT_PAGE_SIZE,
+                ):
+                    # Check if we should continue based on time-based filters
+                    if not self._should_fetch_more_pages(homes):
+                        break
+
+                    result = self.general_search(
+                        variables=search_variables | {"offset": current_offset},
                         search_type=search_type,
-                    ))
-                    for i in range(
-                        self.offset + self.DEFAULT_PAGE_SIZE,
-                        min(total, self.offset + self.limit),
-                        self.DEFAULT_PAGE_SIZE,
                     )
-                ]
-
-                # Collect results and sort by offset to preserve API sort order across pages
-                results = []
-                for offset, future in futures_with_offsets:
-                    results.append((offset, future.result()["properties"]))
-
-                # Sort by offset and concatenate in correct order
-                results.sort(key=lambda x: x[0])
-                for offset, properties in results:
-                    homes.extend(properties)
+                    page_properties = result["properties"]
+                    homes.extend(page_properties)
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)

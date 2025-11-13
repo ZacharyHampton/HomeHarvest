@@ -94,6 +94,17 @@ properties = scrape_property(
 )
 ```
 
+#### Pagination Control
+```py
+# Sequential mode with early termination (more efficient for narrow filters)
+properties = scrape_property(
+    location="Los Angeles, CA",
+    listing_type="for_sale",
+    updated_in_past_hours=2,  # Narrow time window
+    parallel=False  # Fetch pages sequentially, stop when filters no longer match
+)
+```
+
 ## Output
 ```plaintext
 >>> properties.head()
@@ -234,7 +245,9 @@ Optional
 │
 ├── limit (integer): Limit the number of properties to fetch. Max & default is 10000.
 │
-└── offset (integer): Starting position for pagination within the 10k limit. Use with limit to fetch results in chunks.
+├── offset (integer): Starting position for pagination within the 10k limit. Use with limit to fetch results in chunks.
+│
+└── parallel (True/False): Controls pagination strategy. Default is True (fetch pages in parallel for speed). Set to False for sequential fetching with early termination (useful for rate limiting or narrow time windows).
 ```
 
 ### Property Schema
