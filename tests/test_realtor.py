@@ -87,6 +87,25 @@ def test_realtor_date_range_sold():
     )
 
 
+def test_listing_type_none_includes_sold():
+    """Test that listing_type=None includes sold listings (issue #142)"""
+    # Get properties with listing_type=None (should include all common types)
+    result_none = scrape_property(
+        location="Warren, MI",
+        listing_type=None
+    )
+
+    # Verify we got results
+    assert result_none is not None and len(result_none) > 0
+
+    # Verify sold listings are included
+    status_types = set(result_none['status'].unique())
+    assert 'SOLD' in status_types, "SOLD listings should be included when listing_type=None"
+
+    # Verify we get multiple listing types (not just one)
+    assert len(status_types) > 1, "Should return multiple listing types when listing_type=None"
+
+
 def test_realtor_single_property():
     results = [
         scrape_property(
