@@ -84,7 +84,7 @@ properties = scrape_property(
 #### Sorting & Listing Types
 ```py
 # Sort options: list_price, list_date, sqft, beds, baths, last_update_date
-# Listing types: "for_sale", "for_rent", "sold", "pending", list, or None (all)
+# Listing types: "for_sale", "for_rent", "sold", "pending", "off_market", list, or None (common types)
 properties = scrape_property(
     location="Miami, FL",
     listing_type=["for_sale", "pending"],  # Single string, list, or None
@@ -158,7 +158,7 @@ Required
 │    - 'other'
 │    - 'ready_to_build'
 │    - List of strings returns properties matching ANY status: ['for_sale', 'pending']
-│    - None returns all listing types
+│    - None returns common listing types (for_sale, for_rent, sold, pending, off_market)
 │
 Optional
 ├── property_type (list): Choose the type of properties.

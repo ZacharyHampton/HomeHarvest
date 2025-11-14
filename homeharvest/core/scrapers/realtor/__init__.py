@@ -144,7 +144,15 @@ class RealtorScraper(Scraper):
         # Determine date field based on listing type
         # Convert listing_type to list for uniform handling
         if self.listing_type is None:
-            listing_types = []
+            # When None, return all common listing types as documented
+            # Note: NEW_COMMUNITY, OTHER, and READY_TO_BUILD are excluded as they typically return no results
+            listing_types = [
+                ListingType.FOR_SALE,
+                ListingType.FOR_RENT,
+                ListingType.SOLD,
+                ListingType.PENDING,
+                ListingType.OFF_MARKET,
+            ]
             date_field = None  # When no listing_type is specified, skip date filtering
         elif isinstance(self.listing_type, list):
             listing_types = self.listing_type
@@ -277,10 +285,14 @@ class RealtorScraper(Scraper):
         else:
             sort_param = ""  #: prioritize normal fractal sort from realtor
 
-        # Handle PENDING with or_filters (applies if PENDING is in the list or is the single type)
+        # Handle PENDING with or_filters
+        # Only use or_filters when PENDING is the only type or mixed only with FOR_SALE
+        # Using or_filters with other types (SOLD, FOR_RENT, etc.) will exclude those types
         has_pending = ListingType.PENDING in listing_types
+        other_types = [lt for lt in listing_types if lt not in [ListingType.PENDING, ListingType.FOR_SALE]]
+        use_or_filters = has_pending and len(other_types) == 0
         pending_or_contingent_param = (
-            "or_filters: { contingent: true, pending: true }" if has_pending else ""
+            "or_filters: { contingent: true, pending: true }" if use_or_filters else ""
         )
 
         # Build bucket parameter (only use fractal sort if no custom sort is specified)
