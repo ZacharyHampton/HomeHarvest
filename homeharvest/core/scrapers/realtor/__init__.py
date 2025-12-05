@@ -35,10 +35,7 @@ from .processors import (
 
 
 class RealtorScraper(Scraper):
-    SEARCH_GQL_URL = "https://www.realtor.com/api/v1/rdc_search_srp?client_id=rdc-search-new-communities&schema=vesta"
-    PROPERTY_URL = "https://www.realtor.com/realestateandhomes-detail/"
-    PROPERTY_GQL = "https://graph.realtor.com/graphql"
-    ADDRESS_AUTOCOMPLETE_URL = "https://parser-external.geo.moveaws.com/suggest"
+    SEARCH_GQL_URL = "https://api.frontdoor.realtor.com/graphql"
     NUM_PROPERTY_WORKERS = 20
     DEFAULT_PAGE_SIZE = 200
 
@@ -46,33 +43,70 @@ class RealtorScraper(Scraper):
         super().__init__(scraper_input)
 
     def handle_location(self):
-        # Get client_id from listing_type
-        if self.listing_type is None:
-            client_id = "for-sale"
-        elif isinstance(self.listing_type, list):
-            client_id = self.listing_type[0].value.lower().replace("_", "-") if self.listing_type else "for-sale"
-        else:
-            client_id = self.listing_type.value.lower().replace("_", "-")
+        query = """query Search_suggestions($searchInput: SearchSuggestionsInput!) {
+            search_suggestions(search_input: $searchInput) {
+                geo_results {
+                    type
+                    text
+                    geo {
+                        _id
+                        area_type
+                        city
+                        state_code
+                        postal_code
+                        county
+                        centroid { lat lon }
+                        slug_id
+                        geo_id
+                    }
+                }
+            }
+        }"""
 
-        params = {
-            "input": self.location,
-            "client_id": client_id,
-            "limit": "1",
-            "area_types": "city,state,county,postal_code,address,street,neighborhood,school,school_district,university,park",
+        variables = {
+            "searchInput": {
+                "search_term": self.location
+            }
         }
 
-        response = self.session.get(
-            self.ADDRESS_AUTOCOMPLETE_URL,
-            params=params,
-        )
+        payload = {
+            "query": query,
+            "variables": variables,
+        }
+
+        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
         response_json = response.json()
 
-        result = response_json["autocomplete"]
-
-        if not result:
+        if (
+            response_json is None
+            or "data" not in response_json
+            or response_json["data"] is None
+            or "search_suggestions" not in response_json["data"]
+            or response_json["data"]["search_suggestions"] is None
+            or "geo_results" not in response_json["data"]["search_suggestions"]
+            or not response_json["data"]["search_suggestions"]["geo_results"]
+        ):
             return None
 
-        return result[0]
+        geo_result = response_json["data"]["search_suggestions"]["geo_results"][0]
+        geo = geo_result.get("geo", {})
+
+        result = {
+            "text": geo_result.get("text"),
+            "area_type": geo.get("area_type"),
+            "city": geo.get("city"),
+            "state_code": geo.get("state_code"),
+            "postal_code": geo.get("postal_code"),
+            "county": geo.get("county"),
+            "centroid": geo.get("centroid"),
+        }
+
+        if geo.get("area_type") == "address":
+            geo_id = geo.get("_id", "")
+            if geo_id.startswith("addr:"):
+                result["mpr_id"] = geo_id.replace("addr:", "")
+
+        return result
 
     def get_latest_listing_id(self, property_id: str) -> str | None:
         query = """query Property($property_id: ID!) {
@@ -108,6 +142,7 @@ class RealtorScraper(Scraper):
             return property_info["listings"][0]["listing_id"]
 
     def handle_home(self, property_id: str) -> list[Property]:
+        """Fetch single home with proper error handling."""
         query = (
             """query Home($property_id: ID!) {
                     home(property_id: $property_id) %s
@@ -116,23 +151,33 @@ class RealtorScraper(Scraper):
         )
 
         variables = {"property_id": property_id}
-        payload = {
-            "query": query,
-            "variables": variables,
-        }
+        payload = {"query": query, "variables": variables}
 
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-        response_json = response.json()
+        try:
+            response = self.session.post(self.SEARCH_GQL_URL, json=payload)
+            data = response.json()
 
-        property_info = response_json["data"]["home"]
+            # Check for errors or missing data
+            if "errors" in data or "data" not in data:
+                return []
 
-        if self.return_type != ReturnType.raw:
-            return [process_property(property_info, self.mls_only, self.extra_property_data, 
-                                   self.exclude_pending, self.listing_type, get_key, process_extra_property_details)]
-        else:
-            return [property_info]
+            if data["data"] is None or "home" not in data["data"]:
+                return []
 
+            property_info = data["data"]["home"]
+            if property_info is None:
+                return []
 
+            # Process based on return type
+            if self.return_type != ReturnType.raw:
+                return [process_property(property_info, self.mls_only, self.extra_property_data,
+                                       self.exclude_pending, self.listing_type, get_key,
+                                       process_extra_property_details)]
+            else:
+                return [property_info]
+
+        except Exception:
+            return []
 
     def general_search(self, variables: dict, search_type: str) -> Dict[str, Union[int, Union[list[Property], list[dict]]]]:
         """
@@ -363,19 +408,13 @@ class RealtorScraper(Scraper):
             )
         elif search_type == "area":  #: general search, came from a general location
             query = """query Home_search(
-                                $city: String,
-                                $county: [String],
-                                $state_code: String,
-                                $postal_code: String
+                                $search_location: SearchLocation,
                                 $offset: Int,
                             ) {
                                 home_search(
                                     query: {
                                         %s
-                                        city: $city
-                                        county: $county
-                                        postal_code: $postal_code
-                                        state_code: $state_code
+                                        search_location: $search_location
                                         %s
                                         %s
                                         %s
@@ -511,24 +550,16 @@ class RealtorScraper(Scraper):
                 if not location_info.get("centroid"):
                     return []
 
-                coordinates = list(location_info["centroid"].values())
+                centroid = location_info["centroid"]
+                coordinates = [centroid["lon"], centroid["lat"]]  # GeoJSON order: [lon, lat]
                 search_variables |= {
                     "coordinates": coordinates,
                     "radius": "{}mi".format(self.radius),
                 }
 
-        elif location_type == "postal_code":
+        else:  #: general search (city, county, postal_code, etc.)
             search_variables |= {
-                "postal_code": location_info.get("postal_code"),
-            }
-
-        else:  #: general search, location
-            search_variables |= {
-                "city": location_info.get("city"),
-                "county": location_info.get("county"),
-                "state_code": location_info.get("state_code"),
-                "postal_code": location_info.get("postal_code"),
-
+                "search_location": {"location": location_info.get("text")},
             }
 
         if self.foreclosure:

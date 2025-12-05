@@ -81,21 +81,21 @@ class Scraper:
             Scraper.session.mount("https://", adapter)
             Scraper.session.headers.update(
                 {
-                    "accept": "application/json, text/javascript",
-                    "accept-language": "en-US,en;q=0.9",
-                    "cache-control": "no-cache",
-                    "content-type": "application/json",
-                    "origin": "https://www.realtor.com",
-                    "pragma": "no-cache",
-                    "priority": "u=1, i",
-                    "rdc-ab-tests": "commute_travel_time_variation:v1",
-                    "sec-ch-ua": '"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                    "sec-fetch-dest": "empty",
-                    "sec-fetch-mode": "cors",
-                    "sec-fetch-site": "same-origin",
-                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                    'sec-ch-ua-platform': '"macOS"',
+                    'rdc-client-name': 'rdc-search-for-sale-desktop',
+                    'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
+                    'sec-ch-ua-mobile': '?0',
+                    'rdc-client-version': '0.1.0',
+                    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                    'accept': 'application/json',
+                    'content-type': 'application/json',
+                    'origin': 'https://www.realtor.com',
+                    'sec-fetch-site': 'same-site',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'referer': 'https://www.realtor.com/',
+                    'accept-language': 'en-US,en;q=0.9',
+                    'priority': 'u=1, i',
                 }
             )
 
