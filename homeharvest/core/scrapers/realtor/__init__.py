@@ -35,9 +35,7 @@ from .processors import (
 
 
 class RealtorScraper(Scraper):
-    SEARCH_GQL_URL = "https://www.realtor.com/api/v1/rdc_search_srp?client_id=rdc-search-new-communities&schema=vesta"
-    PROPERTY_URL = "https://www.realtor.com/realestateandhomes-detail/"
-    PROPERTY_GQL = "https://graph.realtor.com/graphql"
+    SEARCH_GQL_URL = "https://api.frontdoor.realtor.com/graphql"
     ADDRESS_AUTOCOMPLETE_URL = "https://parser-external.geo.moveaws.com/suggest"
     NUM_PROPERTY_WORKERS = 20
     DEFAULT_PAGE_SIZE = 200
@@ -108,6 +106,7 @@ class RealtorScraper(Scraper):
             return property_info["listings"][0]["listing_id"]
 
     def handle_home(self, property_id: str) -> list[Property]:
+        """Fetch single home with proper error handling."""
         query = (
             """query Home($property_id: ID!) {
                     home(property_id: $property_id) %s
@@ -116,23 +115,33 @@ class RealtorScraper(Scraper):
         )
 
         variables = {"property_id": property_id}
-        payload = {
-            "query": query,
-            "variables": variables,
-        }
+        payload = {"query": query, "variables": variables}
 
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-        response_json = response.json()
+        try:
+            response = self.session.post(self.SEARCH_GQL_URL, json=payload)
+            data = response.json()
 
-        property_info = response_json["data"]["home"]
+            # Check for errors or missing data
+            if "errors" in data or "data" not in data:
+                return []
 
-        if self.return_type != ReturnType.raw:
-            return [process_property(property_info, self.mls_only, self.extra_property_data, 
-                                   self.exclude_pending, self.listing_type, get_key, process_extra_property_details)]
-        else:
-            return [property_info]
+            if data["data"] is None or "home" not in data["data"]:
+                return []
 
+            property_info = data["data"]["home"]
+            if property_info is None:
+                return []
 
+            # Process based on return type
+            if self.return_type != ReturnType.raw:
+                return [process_property(property_info, self.mls_only, self.extra_property_data,
+                                       self.exclude_pending, self.listing_type, get_key,
+                                       process_extra_property_details)]
+            else:
+                return [property_info]
+
+        except Exception:
+            return []
 
     def general_search(self, variables: dict, search_type: str) -> Dict[str, Union[int, Union[list[Property], list[dict]]]]:
         """
@@ -366,7 +375,7 @@ class RealtorScraper(Scraper):
                                 $city: String,
                                 $county: [String],
                                 $state_code: String,
-                                $postal_code: String
+                                $postal_code: String,
                                 $offset: Int,
                             ) {
                                 home_search(
