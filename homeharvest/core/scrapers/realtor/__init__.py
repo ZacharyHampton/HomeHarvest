@@ -42,8 +42,37 @@ class RealtorScraper(Scraper):
     def __init__(self, scraper_input):
         super().__init__(scraper_input)
 
+    def _graphql_post(self, query: str, variables: dict, operation_name: str) -> dict:
+        """
+        Execute a GraphQL query with operation-specific headers.
+
+        Args:
+            query: GraphQL query string (must include operationName matching operation_name param)
+            variables: Query variables dictionary
+            operation_name: Name of the GraphQL operation for Apollo headers
+
+        Returns:
+            Response JSON dictionary
+        """
+        # Set operation-specific header (must match query's operationName)
+        self.session.headers['X-APOLLO-OPERATION-NAME'] = operation_name
+
+        payload = {
+            "operationName": operation_name,  # Include in payload
+            "query": query,
+            "variables": variables,
+        }
+
+        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
+        return response.json()
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        stop=stop_after_attempt(3),
+    )
     def handle_location(self):
-        query = """query Search_suggestions($searchInput: SearchSuggestionsInput!) {
+        query = """query SearchSuggestions($searchInput: SearchSuggestionsInput!) {
             search_suggestions(search_input: $searchInput) {
                 geo_results {
                     type
@@ -69,13 +98,7 @@ class RealtorScraper(Scraper):
             }
         }
 
-        payload = {
-            "query": query,
-            "variables": variables,
-        }
-
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-        response_json = response.json()
+        response_json = self._graphql_post(query, variables, "SearchSuggestions")
 
         if (
             response_json is None
@@ -86,6 +109,11 @@ class RealtorScraper(Scraper):
             or "geo_results" not in response_json["data"]["search_suggestions"]
             or not response_json["data"]["search_suggestions"]["geo_results"]
         ):
+            # If we got a 400 error with "Required parameter is missing", raise to trigger retry
+            if response_json and "errors" in response_json:
+                error_msgs = [e.get("message", "") for e in response_json.get("errors", [])]
+                if any("Required parameter is missing" in msg for msg in error_msgs):
+                    raise Exception(f"Transient API error: {error_msgs}")
             return None
 
         geo_result = response_json["data"]["search_suggestions"]["geo_results"][0]
@@ -109,7 +137,7 @@ class RealtorScraper(Scraper):
         return result
 
     def get_latest_listing_id(self, property_id: str) -> str | None:
-        query = """query Property($property_id: ID!) {
+        query = """query GetPropertyListingId($property_id: ID!) {
                     property(id: $property_id) {
                         listings {
                             listing_id
@@ -120,13 +148,7 @@ class RealtorScraper(Scraper):
                 """
 
         variables = {"property_id": property_id}
-        payload = {
-            "query": query,
-            "variables": variables,
-        }
-
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-        response_json = response.json()
+        response_json = self._graphql_post(query, variables, "GetPropertyListingId")
 
         property_info = response_json["data"]["property"]
         if property_info["listings"] is None:
@@ -144,18 +166,16 @@ class RealtorScraper(Scraper):
     def handle_home(self, property_id: str) -> list[Property]:
         """Fetch single home with proper error handling."""
         query = (
-            """query Home($property_id: ID!) {
+            """query GetHomeDetails($property_id: ID!) {
                     home(property_id: $property_id) %s
                 }"""
             % HOMES_DATA
         )
 
         variables = {"property_id": property_id}
-        payload = {"query": query, "variables": variables}
 
         try:
-            response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-            data = response.json()
+            data = self._graphql_post(query, variables, "GetHomeDetails")
 
             # Check for errors or missing data
             if "errors" in data or "data" not in data:
@@ -374,7 +394,7 @@ class RealtorScraper(Scraper):
             is_foreclosure = "foreclosure: false"
 
         if search_type == "comps":  #: comps search, came from an address
-            query = """query Property_search(
+            query = """query GetHomeSearch(
                     $coordinates: [Float]!
                     $radius: String!
                     $offset: Int!,
@@ -407,7 +427,7 @@ class RealtorScraper(Scraper):
                 GENERAL_RESULTS_QUERY,
             )
         elif search_type == "area":  #: general search, came from a general location
-            query = """query Home_search(
+            query = """query GetHomeSearch(
                                 $search_location: SearchLocation,
                                 $offset: Int,
                             ) {
@@ -439,7 +459,7 @@ class RealtorScraper(Scraper):
             )
         else:  #: general search, came from an address
             query = (
-                """query Property_search(
+                """query GetHomeSearch(
                         $property_id: [ID]!
                         $offset: Int!,
                     ) {
@@ -454,13 +474,7 @@ class RealtorScraper(Scraper):
                 % GENERAL_RESULTS_QUERY
             )
 
-        payload = {
-            "query": query,
-            "variables": variables,
-        }
-
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
-        response_json = response.json()
+        response_json = self._graphql_post(query, variables, "GetHomeSearch")
         search_key = "home_search" if "home_search" in query else "property_search"
 
         properties: list[Union[Property, dict]] = []
@@ -1081,8 +1095,8 @@ class RealtorScraper(Scraper):
 
 
     @retry(
-        retry=retry_if_exception_type(JSONDecodeError),
-        wait=wait_exponential(min=4, max=10),
+        retry=retry_if_exception_type((JSONDecodeError, Exception)),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
         stop=stop_after_attempt(3),
     )
     def get_bulk_prop_details(self, property_ids: list[str]) -> dict:
@@ -1101,15 +1115,19 @@ class RealtorScraper(Scraper):
             for property_id in property_ids
         )
         query = f"""{HOME_FRAGMENT}
-        
-        query GetHomes {{
-            {fragments}
-        }}"""
 
-        response = self.session.post(self.SEARCH_GQL_URL, json={"query": query})
-        data = response.json()
+query GetBulkPropertyDetails {{
+    {fragments}
+}}"""
+
+        data = self._graphql_post(query, {}, "GetBulkPropertyDetails")
 
         if "data" not in data:
+            # If we got a 400 error with "Required parameter is missing", raise to trigger retry
+            if data and "errors" in data:
+                error_msgs = [e.get("message", "") for e in data.get("errors", [])]
+                if any("Required parameter is missing" in msg for msg in error_msgs):
+                    raise Exception(f"Transient API error: {error_msgs}")
             return {}
 
         properties = data["data"]

@@ -1,4 +1,5 @@
 import pytz
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from homeharvest import scrape_property, Property
 import pandas as pd
@@ -305,6 +306,30 @@ def test_phone_number_matching():
 
     #: assert phone numbers are the same
     assert row["agent_phones"].values[0] == matching_row["agent_phones"].values[0]
+
+
+def test_parallel_search_consistency():
+    """Test that the same search executed 3 times in parallel returns consistent results"""
+    def search_task():
+        return scrape_property(
+            location="Phoenix, AZ",
+            listing_type="for_sale",
+            limit=100
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(search_task) for _ in range(3)]
+        results = [future.result() for future in as_completed(futures)]
+
+    # Verify all results are valid
+    assert all([result is not None for result in results])
+    assert all([isinstance(result, pd.DataFrame) for result in results])
+    assert all([len(result) > 0 for result in results])
+
+    # Verify all results have the same length (primary consistency check)
+    lengths = [len(result) for result in results]
+    assert len(set(lengths)) == 1, \
+        f"All parallel searches should return same number of results, got lengths: {lengths}"
 
 
 def test_return_type():
