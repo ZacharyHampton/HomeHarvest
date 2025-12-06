@@ -76,26 +76,22 @@ class Scraper:
                 total=3, backoff_factor=4, status_forcelist=[429, 403], allowed_methods=frozenset(["GET", "POST"])
             )
 
-            adapter = HTTPAdapter(max_retries=retries)
+            adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=20)
             Scraper.session.mount("http://", adapter)
             Scraper.session.mount("https://", adapter)
             Scraper.session.headers.update(
                 {
-                    'sec-ch-ua-platform': '"macOS"',
-                    'rdc-client-name': 'rdc-search-for-sale-desktop',
-                    'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-                    'sec-ch-ua-mobile': '?0',
-                    'rdc-client-version': '0.1.0',
-                    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                    'accept': 'application/json',
-                    'content-type': 'application/json',
-                    'origin': 'https://www.realtor.com',
-                    'sec-fetch-site': 'same-site',
-                    'sec-fetch-mode': 'cors',
-                    'sec-fetch-dest': 'empty',
-                    'referer': 'https://www.realtor.com/',
-                    'accept-language': 'en-US,en;q=0.9',
-                    'priority': 'u=1, i',
+                    'Host': 'api.frontdoor.realtor.com',
+                    'rdc-ab-test-client': 'ios_for_sale',
+                    'Content-Type': 'application/json',
+                    'apollographql-client-version': '26.9.25-26.9.25.0774600',
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'rdc-client-version': '26.9.25',
+                    'X-APOLLO-OPERATION-TYPE': 'query',
+                    'rdc-client-name': 'RDC_NATIVE_MOBILE-iPhone-com.move.Realtor',
+                    'apollographql-client-name': 'com.move.Realtor-apollo-ios',
+                    'User-Agent': 'Realtor.com/26.9.25.0774600 CFNetwork/3860.200.71 Darwin/25.1.0',
                 }
             )
 
