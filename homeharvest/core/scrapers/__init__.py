@@ -91,6 +91,8 @@ class Scraper:
                     'X-APOLLO-OPERATION-TYPE': 'query',
                     'rdc-client-name': 'RDC_NATIVE_MOBILE-iPhone-com.move.Realtor',
                     'apollographql-client-name': 'com.move.Realtor-apollo-ios',
+                    'newrelic': '',
+                    'transparent': '',
                     'User-Agent': 'Realtor.com/26.9.25.0774600 CFNetwork/3860.200.71 Darwin/25.1.0',
                 }
             )

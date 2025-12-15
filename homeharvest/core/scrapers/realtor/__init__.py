@@ -26,7 +26,7 @@ from ..models import (
     ListingType,
     ReturnType
 )
-from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT
+from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT
 from .processors import (
     process_property,
     process_extra_property_details,
@@ -72,22 +72,26 @@ class RealtorScraper(Scraper):
         stop=stop_after_attempt(3),
     )
     def handle_location(self):
-        query = """query SearchSuggestions($searchInput: SearchSuggestionsInput!) {
+        query = """
+        fragment SuggestionFragment on SearchSuggestionGeoResult {
+            type
+            text
+            geo {
+                _id
+                area_type
+                city
+                state_code
+                postal_code
+                county
+                centroid { lat lon }
+                slug_id
+                geo_id
+            }
+        }
+        query SearchSuggestions($searchInput: SearchSuggestionsInput!) {
             search_suggestions(search_input: $searchInput) {
                 geo_results {
-                    type
-                    text
-                    geo {
-                        _id
-                        area_type
-                        city
-                        state_code
-                        postal_code
-                        county
-                        centroid { lat lon }
-                        slug_id
-                        geo_id
-                    }
+                    ...SuggestionFragment
                 }
             }
         }"""
@@ -137,11 +141,15 @@ class RealtorScraper(Scraper):
         return result
 
     def get_latest_listing_id(self, property_id: str) -> str | None:
-        query = """query GetPropertyListingId($property_id: ID!) {
+        query = """
+                fragment ListingFragment on Listing {
+                    listing_id
+                    primary
+                }
+                query GetPropertyListingId($property_id: ID!) {
                     property(id: $property_id) {
                         listings {
-                            listing_id
-                            primary
+                            ...ListingFragment
                         }
                     }
                 }
@@ -166,10 +174,13 @@ class RealtorScraper(Scraper):
     def handle_home(self, property_id: str) -> list[Property]:
         """Fetch single home with proper error handling."""
         query = (
-            """query GetHomeDetails($property_id: ID!) {
-                    home(property_id: $property_id) %s
+            """%s
+                query GetHomeDetails($property_id: ID!) {
+                    home(property_id: $property_id) {
+                        ...HomeDetailsFragment
+                    }
                 }"""
-            % HOMES_DATA
+            % HOME_FRAGMENT
         )
 
         variables = {"property_id": property_id}
@@ -394,12 +405,13 @@ class RealtorScraper(Scraper):
             is_foreclosure = "foreclosure: false"
 
         if search_type == "comps":  #: comps search, came from an address
-            query = """query GetHomeSearch(
+            query = """%s
+                query GetHomeSearch(
                     $coordinates: [Float]!
                     $radius: String!
                     $offset: Int!,
                     ) {
-                        home_search(
+                        homeSearch: home_search(
                             query: {
                                 %s
                                 nearby: {
@@ -417,6 +429,7 @@ class RealtorScraper(Scraper):
                             offset: $offset
                     ) %s
                 }""" % (
+                SEARCH_RESULTS_FRAGMENT,
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -427,11 +440,12 @@ class RealtorScraper(Scraper):
                 GENERAL_RESULTS_QUERY,
             )
         elif search_type == "area":  #: general search, came from a general location
-            query = """query GetHomeSearch(
+            query = """%s
+                            query GetHomeSearch(
                                 $search_location: SearchLocation,
                                 $offset: Int,
                             ) {
-                                home_search(
+                                homeSearch: home_search(
                                     query: {
                                         %s
                                         search_location: $search_location
@@ -447,6 +461,7 @@ class RealtorScraper(Scraper):
                                     offset: $offset
                                 ) %s
                             }""" % (
+                SEARCH_RESULTS_FRAGMENT,
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -459,11 +474,12 @@ class RealtorScraper(Scraper):
             )
         else:  #: general search, came from an address
             query = (
-                """query GetHomeSearch(
+                """%s
+                    query GetHomeSearch(
                         $property_id: [ID]!
                         $offset: Int!,
                     ) {
-                        home_search(
+                        homeSearch: home_search(
                             query: {
                                 property_id: $property_id
                             }
@@ -471,11 +487,11 @@ class RealtorScraper(Scraper):
                             offset: $offset
                         ) %s
                     }"""
-                % GENERAL_RESULTS_QUERY
+                % (SEARCH_RESULTS_FRAGMENT, GENERAL_RESULTS_QUERY)
             )
 
         response_json = self._graphql_post(query, variables, "GetHomeSearch")
-        search_key = "home_search" if "home_search" in query else "property_search"
+        search_key = "homeSearch"
 
         properties: list[Union[Property, dict]] = []
 
@@ -1109,18 +1125,17 @@ class RealtorScraper(Scraper):
 
         property_ids = list(set(property_ids))
 
-        # Construct the bulk query
         fragments = "\n".join(
-            f'home_{property_id}: home(property_id: {property_id}) {{ ...HomeData }}'
+            f'home_{property_id}: home(property_id: {property_id}) {{ ...HomeDetailsFragment }}'
             for property_id in property_ids
         )
         query = f"""{HOME_FRAGMENT}
 
-query GetBulkPropertyDetails {{
+query GetHomeDetails {{
     {fragments}
 }}"""
 
-        data = self._graphql_post(query, {}, "GetBulkPropertyDetails")
+        data = self._graphql_post(query, {}, "GetHomeDetails")
 
         if "data" not in data:
             # If we got a 400 error with "Required parameter is missing", raise to trigger retry
