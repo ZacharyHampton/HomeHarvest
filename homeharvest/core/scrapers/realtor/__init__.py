@@ -1137,7 +1137,7 @@ query GetHomeDetails {{
 
         data = self._graphql_post(query, {}, "GetHomeDetails")
 
-        if "data" not in data:
+        if "data" not in data or data["data"] is None:
             # If we got a 400 error with "Required parameter is missing", raise to trigger retry
             if data and "errors" in data:
                 error_msgs = [e.get("message", "") for e in data.get("errors", [])]
@@ -1146,6 +1146,6 @@ query GetHomeDetails {{
             return {}
 
         properties = data["data"]
-        return {data.replace('home_', ''): properties[data] for data in properties if properties[data]}
+        return {key.replace('home_', ''): properties[key] for key in properties if properties[key]}
 
 
