@@ -73,7 +73,7 @@ class Scraper:
         if not self.session:
             Scraper.session = requests.Session()
             retries = Retry(
-                total=3, backoff_factor=4, status_forcelist=[429, 403], allowed_methods=frozenset(["GET", "POST"])
+                total=3, backoff_factor=4, status_forcelist=[429], allowed_methods=frozenset(["GET", "POST"])
             )
 
             adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=20)
@@ -81,25 +81,21 @@ class Scraper:
             Scraper.session.mount("https://", adapter)
             Scraper.session.headers.update(
                 {
-                    'Host': 'api.frontdoor.realtor.com',
-                    'rdc-ab-test-client': 'ios_for_sale',
                     'Content-Type': 'application/json',
-                    'apollographql-client-version': '26.9.25-26.9.25.0774600',
+                    'apollographql-client-version': '26.11.0-26.11.0.0249758',
                     'Accept': '*/*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'rdc-client-version': '26.9.25',
+                    'rdc-client-version': '26.11.0',
                     'X-APOLLO-OPERATION-TYPE': 'query',
                     'rdc-client-name': 'RDC_NATIVE_MOBILE-iPhone-com.move.Realtor',
                     'apollographql-client-name': 'com.move.Realtor-apollo-ios',
-                    'newrelic': '',
-                    'transparent': '',
-                    'User-Agent': 'Realtor.com/26.9.25.0774600 CFNetwork/3860.200.71 Darwin/25.1.0',
+                    'User-Agent': 'Realtor.com/26.11.0.0249758 CFNetwork/3860.200.71 Darwin/25.1.0',
                 }
             )
 
-        if scraper_input.proxy:
-            proxy_url = scraper_input.proxy
-            proxies = {"http": proxy_url, "https": proxy_url}
+        self.proxy = scraper_input.proxy
+        if self.proxy:
+            proxies = {"http": self.proxy, "https": self.proxy}
             self.session.proxies.update(proxies)
 
         self.listing_type = scraper_input.listing_type

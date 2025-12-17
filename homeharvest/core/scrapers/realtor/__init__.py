@@ -8,6 +8,7 @@ This module implements the scraper for realtor.com
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from json import JSONDecodeError
@@ -21,12 +22,13 @@ from tenacity import (
 )
 
 from .. import Scraper
+from ....exceptions import AuthenticationError
 from ..models import (
     Property,
     ListingType,
     ReturnType
 )
-from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT
+from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT, MORPHEUS_SUGGESTIONS_QUERY
 from .processors import (
     process_property,
     process_extra_property_details,
@@ -41,6 +43,12 @@ class RealtorScraper(Scraper):
 
     def __init__(self, scraper_input):
         super().__init__(scraper_input)
+
+    @staticmethod
+    def _minify_query(query: str) -> str:
+        """Minify GraphQL query by collapsing whitespace to single spaces."""
+        # Split on whitespace, filter empty strings, join with single space
+        return ' '.join(query.split())
 
     def _graphql_post(self, query: str, variables: dict, operation_name: str) -> dict:
         """
@@ -59,11 +67,21 @@ class RealtorScraper(Scraper):
 
         payload = {
             "operationName": operation_name,  # Include in payload
-            "query": query,
+            "query": self._minify_query(query),
             "variables": variables,
         }
 
         response = self.session.post(self.SEARCH_GQL_URL, json=payload)
+
+        if response.status_code == 403:
+            if not self.proxy:
+                raise AuthenticationError(
+                    "Received 403 Forbidden from Realtor.com API.",
+                    response=response
+                )
+            else:
+                raise Exception("Received 403 Forbidden, retrying...")
+
         return response.json()
 
     @retry(
@@ -72,37 +90,13 @@ class RealtorScraper(Scraper):
         stop=stop_after_attempt(3),
     )
     def handle_location(self):
-        query = """
-        fragment SuggestionFragment on SearchSuggestionGeoResult {
-            type
-            text
-            geo {
-                _id
-                area_type
-                city
-                state_code
-                postal_code
-                county
-                centroid { lat lon }
-                slug_id
-                geo_id
-            }
-        }
-        query SearchSuggestions($searchInput: SearchSuggestionsInput!) {
-            search_suggestions(search_input: $searchInput) {
-                geo_results {
-                    ...SuggestionFragment
-                }
-            }
-        }"""
-
         variables = {
             "searchInput": {
                 "search_term": self.location
             }
         }
 
-        response_json = self._graphql_post(query, variables, "SearchSuggestions")
+        response_json = self._graphql_post(MORPHEUS_SUGGESTIONS_QUERY, variables, "GetMorpheusSuggestions")
 
         if (
             response_json is None
@@ -405,8 +399,7 @@ class RealtorScraper(Scraper):
             is_foreclosure = "foreclosure: false"
 
         if search_type == "comps":  #: comps search, came from an address
-            query = """%s
-                query GetHomeSearch(
+            query = """query GetHomeSearch(
                     $coordinates: [Float]!
                     $radius: String!
                     $offset: Int!,
@@ -428,8 +421,9 @@ class RealtorScraper(Scraper):
                             limit: 200
                             offset: $offset
                     ) %s
-                }""" % (
-                SEARCH_RESULTS_FRAGMENT,
+                }
+                %s
+                %s""" % (
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -438,10 +432,11 @@ class RealtorScraper(Scraper):
                 pending_or_contingent_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
+                SEARCH_RESULTS_FRAGMENT,
+                LISTING_PHOTOS_FRAGMENT,
             )
         elif search_type == "area":  #: general search, came from a general location
-            query = """%s
-                            query GetHomeSearch(
+            query = """query GetHomeSearch(
                                 $search_location: SearchLocation,
                                 $offset: Int,
                             ) {
@@ -460,8 +455,9 @@ class RealtorScraper(Scraper):
                                     limit: 200
                                     offset: $offset
                                 ) %s
-                            }""" % (
-                SEARCH_RESULTS_FRAGMENT,
+                            }
+                            %s
+                            %s""" % (
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -471,11 +467,12 @@ class RealtorScraper(Scraper):
                 bucket_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
+                SEARCH_RESULTS_FRAGMENT,
+                LISTING_PHOTOS_FRAGMENT,
             )
         else:  #: general search, came from an address
             query = (
-                """%s
-                    query GetHomeSearch(
+                """query GetHomeSearch(
                         $property_id: [ID]!
                         $offset: Int!,
                     ) {
@@ -486,8 +483,10 @@ class RealtorScraper(Scraper):
                             limit: 1
                             offset: $offset
                         ) %s
-                    }"""
-                % (SEARCH_RESULTS_FRAGMENT, GENERAL_RESULTS_QUERY)
+                    }
+                    %s
+                    %s"""
+                % (GENERAL_RESULTS_QUERY, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT)
             )
 
         response_json = self._graphql_post(query, variables, "GetHomeSearch")
