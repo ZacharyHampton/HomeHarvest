@@ -71,7 +71,7 @@ class RealtorScraper(Scraper):
             "variables": variables,
         }
 
-        response = self.session.post(self.SEARCH_GQL_URL, json=payload)
+        response = self.session.post(self.SEARCH_GQL_URL, data=json.dumps(payload, separators=(',', ':')))
 
         if response.status_code == 403:
             if not self.proxy:

@@ -82,14 +82,14 @@ class Scraper:
             Scraper.session.headers.update(
                 {
                     'Content-Type': 'application/json',
-                    'apollographql-client-version': '26.11.0-26.11.0.0249758',
+                    'apollographql-client-version': '26.11.1-26.11.1.1106489',
                     'Accept': '*/*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'rdc-client-version': '26.11.0',
+                    'rdc-client-version': '26.11.1',
                     'X-APOLLO-OPERATION-TYPE': 'query',
                     'rdc-client-name': 'RDC_NATIVE_MOBILE-iPhone-com.move.Realtor',
                     'apollographql-client-name': 'com.move.Realtor-apollo-ios',
-                    'User-Agent': 'Realtor.com/26.11.0.0249758 CFNetwork/3860.200.71 Darwin/25.1.0',
+                    'User-Agent': 'Realtor.com/26.11.1.1106489 CFNetwork/3860.200.71 Darwin/25.1.0',
                 }
             )
 
