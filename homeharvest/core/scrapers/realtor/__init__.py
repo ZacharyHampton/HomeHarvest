@@ -29,7 +29,7 @@ from ..models import (
     ListingType,
     ReturnType
 )
-from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT, MORPHEUS_SUGGESTIONS_QUERY
+from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT, SEARCH_SUGGESTIONS_QUERY
 from .processors import (
     process_property,
     process_extra_property_details,
@@ -38,7 +38,7 @@ from .processors import (
 
 
 class RealtorScraper(Scraper):
-    SEARCH_GQL_URL = "https://api.frontdoor.realtor.com/graphql"
+    SEARCH_GQL_URL = "https://www.realtor.com/frontdoor/graphql"
     NUM_PROPERTY_WORKERS = 20
     DEFAULT_PAGE_SIZE = 200
 
@@ -53,21 +53,18 @@ class RealtorScraper(Scraper):
 
     def _graphql_post(self, query: str, variables: dict, operation_name: str) -> dict:
         """
-        Execute a GraphQL query with operation-specific headers.
+        Execute a GraphQL query.
 
         Args:
             query: GraphQL query string (must include operationName matching operation_name param)
             variables: Query variables dictionary
-            operation_name: Name of the GraphQL operation for Apollo headers
+            operation_name: Name of the GraphQL operation
 
         Returns:
             Response JSON dictionary
         """
-        # Set operation-specific header (must match query's operationName)
-        self.session.headers['X-APOLLO-OPERATION-NAME'] = operation_name
-
         payload = {
-            "operationName": operation_name,  # Include in payload
+            "operationName": operation_name,
             "query": self._minify_query(query),
             "variables": variables,
         }
@@ -97,7 +94,7 @@ class RealtorScraper(Scraper):
             }
         }
 
-        response_json = self._graphql_post(MORPHEUS_SUGGESTIONS_QUERY, variables, "GetMorpheusSuggestions")
+        response_json = self._graphql_post(SEARCH_SUGGESTIONS_QUERY, variables, "Search_suggestions")
 
         if (
             response_json is None
