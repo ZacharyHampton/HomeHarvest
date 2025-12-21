@@ -371,7 +371,7 @@ _SEARCH_HOMES_DATA_BASE = """{
 
 
 HOME_FRAGMENT = """
-fragment HomeDetailsFragment on Home {
+fragment SearchFragment on Home {
     __typename
     pending_date
     listing_id
