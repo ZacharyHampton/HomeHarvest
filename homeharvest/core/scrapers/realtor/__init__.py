@@ -126,9 +126,14 @@ class RealtorScraper(Scraper):
         }
 
         if geo.get("area_type") == "address":
-            geo_id = geo.get("_id", "")
-            if geo_id.startswith("addr:"):
-                result["mpr_id"] = geo_id.replace("addr:", "")
+            # Try to get mpr_id directly from API response first
+            if geo.get("mpr_id"):
+                result["mpr_id"] = geo.get("mpr_id")
+            else:
+                # Fallback: extract from _id field if it has addr: prefix
+                geo_id = geo.get("_id", "")
+                if geo_id.startswith("addr:"):
+                    result["mpr_id"] = geo_id.replace("addr:", "")
 
         return result
 
@@ -169,7 +174,7 @@ class RealtorScraper(Scraper):
             """%s
                 query GetHomeDetails($property_id: ID!) {
                     home(property_id: $property_id) {
-                        ...HomeDetailsFragment
+                        ...SearchFragment
                     }
                 }"""
             % HOME_FRAGMENT

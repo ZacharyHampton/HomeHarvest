@@ -721,6 +721,7 @@ SEARCH_SUGGESTIONS_QUERY = """query Search_suggestions($searchInput: SearchSugge
       geo {
         _id
         _score
+        mpr_id
         area_type
         city
         state_code
@@ -764,6 +765,7 @@ SEARCH_SUGGESTIONS_QUERY = """query Search_suggestions($searchInput: SearchSugge
       geo {
         _id
         _score
+        mpr_id
         area_type
         city
         state_code

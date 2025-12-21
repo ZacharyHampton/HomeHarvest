@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "homeharvest"
-version = "0.8.15"
+version = "0.8.16"
 description = "Real estate scraping library"
 authors = ["Zachary Hampton <zachary@bunsly.com>", "Cullen Watson <cullen@bunsly.com>"]
 homepage = "https://github.com/ZacharyHampton/HomeHarvest"
