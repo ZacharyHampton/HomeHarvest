@@ -1,5 +1,5 @@
 SEARCH_RESULTS_FRAGMENT = """
-fragment SearchFragment on SearchHome {
+fragment PropertyResult on SearchHome {
     __typename
     pending_date
     listing_id
@@ -371,7 +371,7 @@ _SEARCH_HOMES_DATA_BASE = """{
 
 
 HOME_FRAGMENT = """
-fragment SearchFragment on Home {
+fragment PropertyResult on Home {
     __typename
     pending_date
     listing_id
@@ -689,12 +689,8 @@ GENERAL_RESULTS_QUERY = """{
                             __typename
                             count
                             total
-                            results {
-                                __typename
-                                ...SearchFragment
-                                ...ListingPhotosFragment
-                            }
-                        }"""
+                            results %s
+                        }""" % SEARCH_HOMES_DATA
 
 LISTING_PHOTOS_FRAGMENT = """
 fragment ListingPhotosFragment on SearchHome {

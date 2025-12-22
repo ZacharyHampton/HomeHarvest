@@ -29,7 +29,7 @@ from ..models import (
     ListingType,
     ReturnType
 )
-from .queries import GENERAL_RESULTS_QUERY, SEARCH_HOMES_DATA, HOMES_DATA, HOME_FRAGMENT, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT, SEARCH_SUGGESTIONS_QUERY
+from .queries import GENERAL_RESULTS_QUERY, HOMES_DATA, SEARCH_SUGGESTIONS_QUERY
 from .processors import (
     process_property,
     process_extra_property_details,
@@ -171,13 +171,10 @@ class RealtorScraper(Scraper):
     def handle_home(self, property_id: str) -> list[Property]:
         """Fetch single home with proper error handling."""
         query = (
-            """%s
-                query GetHomeDetails($property_id: ID!) {
-                    home(property_id: $property_id) {
-                        ...SearchFragment
-                    }
+            """query GetHomeDetails($property_id: ID!) {
+                    home(property_id: $property_id) %s
                 }"""
-            % HOME_FRAGMENT
+            % HOMES_DATA
         )
 
         variables = {"property_id": property_id}
@@ -424,9 +421,7 @@ class RealtorScraper(Scraper):
                             limit: 200
                             offset: $offset
                     ) %s
-                }
-                %s
-                %s""" % (
+                }""" % (
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -435,13 +430,11 @@ class RealtorScraper(Scraper):
                 pending_or_contingent_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
-                SEARCH_RESULTS_FRAGMENT,
-                LISTING_PHOTOS_FRAGMENT,
             )
         elif search_type == "area":  #: general search, came from a general location
             query = """query GetHomeSearch(
                                 $search_location: SearchLocation,
-                                $offset: Int,
+                                $offset: Int
                             ) {
                                 homeSearch: home_search(
                                     query: {
@@ -458,9 +451,7 @@ class RealtorScraper(Scraper):
                                     limit: 200
                                     offset: $offset
                                 ) %s
-                            }
-                            %s
-                            %s""" % (
+                            }""" % (
                 is_foreclosure,
                 status_param,
                 date_param,
@@ -470,8 +461,6 @@ class RealtorScraper(Scraper):
                 bucket_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
-                SEARCH_RESULTS_FRAGMENT,
-                LISTING_PHOTOS_FRAGMENT,
             )
         else:  #: general search, came from an address
             query = (
@@ -486,10 +475,8 @@ class RealtorScraper(Scraper):
                             limit: 1
                             offset: $offset
                         ) %s
-                    }
-                    %s
-                    %s"""
-                % (GENERAL_RESULTS_QUERY, SEARCH_RESULTS_FRAGMENT, LISTING_PHOTOS_FRAGMENT)
+                    }"""
+                % GENERAL_RESULTS_QUERY
             )
 
         response_json = self._graphql_post(query, variables, "GetHomeSearch")
@@ -1128,12 +1115,10 @@ class RealtorScraper(Scraper):
         property_ids = list(set(property_ids))
 
         fragments = "\n".join(
-            f'home_{property_id}: home(property_id: {property_id}) {{ ...SearchFragment }}'
+            f'home_{property_id}: home(property_id: {property_id}) {HOMES_DATA}'
             for property_id in property_ids
         )
-        query = f"""{HOME_FRAGMENT}
-
-query GetHome {{
+        query = f"""query GetHome {{
     {fragments}
 }}"""
 
