@@ -19,6 +19,30 @@ HomeHarvest currently defaults to `realtor.com`. International support should be
 - Keep live network tests out of CI; use fixtures for parsers and URL builders.
 - Treat sold/transaction data as a separate underwriting input where portals do not expose it directly.
 
+## Provider Registry
+
+The package exposes `homeharvest.list_international_sources()` so Realist can inspect the supported and planned international sources without scraping docs.
+
+Current registry:
+
+| Market | Site | Status | Underwriting backstop |
+| --- | --- | --- | --- |
+| United Kingdom | `rightmove` | MVP | HM Land Registry Price Paid Data |
+| Australia | `domain.com.au` | planned | state title and valuer-general datasets where available |
+| Dubai / UAE | `bayut` | planned | Dubai Land Department transaction and rent data |
+| Spain | `idealista` | planned | TBD / licensed data |
+| Germany | `immoscout24` | planned | TBD / licensed data |
+
 ## First Target
 
 Rightmove is the first adapter because the UK has both strong portal coverage and public sold-price data. The first implementation extracts embedded search-page JSON and maps it into `Property` with `source_site="rightmove"`, `country="GB"`, and `currency="GBP"`.
+
+Known Rightmove city seeds:
+
+- London: `REGION^87490`
+- Manchester: `REGION^904`
+- Birmingham: `REGION^162`
+- Leeds: `REGION^787`
+- Liverpool: `REGION^813`
+
+You can pass either one of those city names or a raw Rightmove `locationIdentifier`.

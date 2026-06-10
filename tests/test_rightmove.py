@@ -22,7 +22,7 @@ def test_rightmove_builds_for_sale_search_url():
     url = scraper._build_search_url()
 
     assert url.startswith("https://www.rightmove.co.uk/property-for-sale/find.html?")
-    assert "searchLocation=London" in url
+    assert "locationIdentifier=REGION%5E87490" in url
     assert "minBedrooms=2" in url
     assert "maxPrice=750000" in url
 
@@ -77,6 +77,9 @@ def test_rightmove_listing_to_property():
         "price": {"displayPrices": [{"displayPrice": "£625,000"}]},
         "bedrooms": "2",
         "bathrooms": "1",
+        "displaySize": "800 sq. ft.",
+        "propertySubType": "Flat",
+        "firstVisibleDate": "2026-06-01T14:51:49Z",
         "summary": "Two-bedroom flat.",
         "location": {"latitude": "51.5", "longitude": "-0.12"},
         "propertyImages": {"images": [{"srcUrl": "https://media.rightmove.co.uk/test.jpg"}]},
@@ -88,6 +91,21 @@ def test_rightmove_listing_to_property():
     assert prop.country == "GB"
     assert prop.currency == "GBP"
     assert prop.list_price == 625000
+    assert prop.prc_sqft == 781
     assert prop.address.full_line == "1 Test Street, London"
     assert prop.description.beds == 2
+    assert prop.description.sqft == 800
     assert prop.latitude == 51.5
+
+
+def test_rightmove_accepts_raw_location_identifier():
+    scraper = RightmoveScraper(
+        ScraperInput(
+            location="REGION^87490",
+            site=SiteName.RIGHTMOVE,
+            listing_type=ListingType.FOR_SALE,
+            return_type=ReturnType.raw,
+        )
+    )
+
+    assert "locationIdentifier=REGION%5E87490" in scraper._build_search_url()
