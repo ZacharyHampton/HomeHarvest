@@ -2,7 +2,7 @@ from __future__ import annotations
 import pandas as pd
 import warnings
 from datetime import datetime
-from .core.scrapers.models import Property, ListingType, Advertisers
+from .core.scrapers.models import Property, ListingType, Advertisers, SiteName
 from .exceptions import InvalidListingType, InvalidDate
 
 ordered_properties = [
@@ -12,6 +12,9 @@ ordered_properties = [
     "permalink",
     "mls",
     "mls_id",
+    "source_site",
+    "country",
+    "currency",
     "status",
     "mls_status",
     "text",
@@ -168,6 +171,10 @@ def validate_input(listing_type: str | list[str] | None) -> None:
     else:
         if listing_type.upper() not in ListingType.__members__:
             raise InvalidListingType(f"Provided listing type, '{listing_type}', does not exist.")
+
+
+def validate_site(site: str) -> None:
+    SiteName.get_by_value(site)
 
 
 def validate_dates(date_from: str | None, date_to: str | None) -> None:

@@ -5,15 +5,18 @@ from .core.scrapers import ScraperInput
 from .utils import (
     process_result, ordered_properties, validate_input, validate_dates, validate_limit,
     validate_offset, validate_datetime, validate_filters, validate_sort, validate_last_update_filters,
+    validate_site,
     convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days, detect_precision_and_convert
 )
 from .core.scrapers.realtor import RealtorScraper
-from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
+from .core.scrapers.rightmove import RightmoveScraper
+from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property, SiteName
 from typing import Union, Optional, List
 
 def scrape_property(
     location: str,
     listing_type: str | list[str] | None = None,
+    site: str = "realtor.com",
     return_type: str = "pandas",
     property_type: Optional[List[str]] = None,
     radius: float = None,
@@ -52,9 +55,10 @@ def scrape_property(
     parallel: bool = True,
 ) -> Union[pd.DataFrame, list[dict], list[Property]]:
     """
-    Scrape properties from Realtor.com based on a given location and listing type.
+    Scrape properties from a supported real estate portal based on a given location and listing type.
 
     :param location: Location to search (e.g. "Dallas, TX", "85281", "2530 Al Lipscomb Way")
+    :param site: Source portal. Supported values: realtor.com, rightmove.
     :param listing_type: Listing Type - can be a string, list of strings, or None.
         Options: for_sale, for_rent, sold, pending, off_market, new_community, other, ready_to_build
         Examples: "for_sale", ["for_sale", "pending"], None (returns all types)
@@ -104,6 +108,7 @@ def scrape_property(
 
     Note: past_days and past_hours also accept timedelta objects for more Pythonic usage.
     """
+    validate_site(site)
     validate_input(listing_type)
     validate_limit(limit)
     validate_offset(offset, limit)
@@ -158,6 +163,7 @@ def scrape_property(
 
     scraper_input = ScraperInput(
         location=location,
+        site=SiteName.get_by_value(site),
         listing_type=converted_listing_type,
         return_type=ReturnType(return_type.lower()),
         property_type=[SearchPropertyType[prop.upper()] for prop in property_type] if property_type else None,
@@ -199,8 +205,12 @@ def scrape_property(
         parallel=parallel,
     )
 
-    site = RealtorScraper(scraper_input)
-    results = site.search()
+    scraper_cls = {
+        SiteName.REALTOR: RealtorScraper,
+        SiteName.RIGHTMOVE: RightmoveScraper,
+    }[scraper_input.site]
+    scraper = scraper_cls(scraper_input)
+    results = scraper.search()
 
     if scraper_input.return_type != ReturnType.pandas:
         return results

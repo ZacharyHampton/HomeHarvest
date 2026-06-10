@@ -32,6 +32,7 @@ DEFAULT_HEADERS = {
 
 class ScraperInput(BaseModel):
     location: str
+    site: SiteName = SiteName.REALTOR
     listing_type: ListingType | list[ListingType] | None
     property_type: list[SearchPropertyType] | None = None
     radius: float | None = None
@@ -84,6 +85,7 @@ class Scraper:
         scraper_input: ScraperInput,
     ):
         self.location = scraper_input.location
+        self.site = scraper_input.site
         self.listing_type = scraper_input.listing_type
         self.property_type = scraper_input.property_type
         self.proxy = scraper_input.proxy

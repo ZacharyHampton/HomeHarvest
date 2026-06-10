@@ -41,6 +41,22 @@ properties.to_csv("results.csv", index=False)
 print(f"Found {len(properties)} properties")
 ```
 
+### International Providers
+
+```py
+from homeharvest import scrape_property
+
+properties = scrape_property(
+    location="London",
+    site="rightmove",
+    listing_type="for_sale",
+    beds_min=2,
+    price_max=750000,
+)
+```
+
+`site` defaults to `realtor.com` for backwards compatibility. Experimental international providers normalize `country`, `currency`, and `source_site` for downstream underwriting.
+
 ### Flexible Location Formats
 ```py
 # Accepts: zip code, city, "city, state", full address, etc.

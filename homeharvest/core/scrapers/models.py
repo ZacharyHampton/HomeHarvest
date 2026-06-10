@@ -15,6 +15,7 @@ class SiteName(Enum):
     ZILLOW = "zillow"
     REDFIN = "redfin"
     REALTOR = "realtor.com"
+    RIGHTMOVE = "rightmove"
 
     @classmethod
     def get_by_value(cls, value):
@@ -186,6 +187,9 @@ class Property(BaseModel):
 
     mls: str | None = None
     mls_id: str | None = None
+    source_site: str | None = Field(None, description="Origin portal/source for the listing")
+    country: str | None = Field(None, description="ISO 3166-1 alpha-2 country code")
+    currency: str | None = Field(None, description="ISO 4217 currency code")
     status: str | None = Field(None, description="Listing status: for_sale, for_rent, sold, off_market, active (New Home Subdivisions), other (if none of the above conditions were met)")
     address: Address | None = None
 
