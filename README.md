@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/zacharyhampton-homeharvest-badge.png)](https://mseep.ai/app/zacharyhampton-homeharvest)
+
 <img src="https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/d1a2bf8b-09f5-4c57-b33a-0ada8a34f12d" width="400">
 
 **HomeHarvest** is a real estate scraping library that extracts and formats data in the style of MLS listings.
