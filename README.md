@@ -6,7 +6,7 @@ Give it a city, ZIP code, or address. Get back a clean table (pandas), typed mod
 
 > **Real estate agent?** Modern Realty writes your lead texts → https://www.modernrealty.io/?utm_source=github&utm_medium=readme&utm_campaign=homeharvest
 
-> **MCP:** a new HomeHarvest MCP server (property data inside your AI agent) is coming soon → [tryhomeharvest.com/mcp](https://tryhomeharvest.com/mcp)
+> **MCP:** a new HomeHarvest MCP server (property data inside your AI agent) is coming soon → [homeharvestdata.com/mcp](https://homeharvestdata.com/mcp)
 
 ## Install
 

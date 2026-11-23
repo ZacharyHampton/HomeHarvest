@@ -46,10 +46,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://tryhomeharvest.com"
+Homepage = "https://homeharvestdata.com"
 Source = "https://github.com/ZacharyHampton/HomeHarvest"
 Issues = "https://github.com/ZacharyHampton/HomeHarvest/issues"
-Docs = "https://tryhomeharvest.com"
+Docs = "https://homeharvestdata.com"
 Changelog = "https://github.com/ZacharyHampton/HomeHarvest/blob/master/CHANGELOG.md"
 
 [tool.poetry]
