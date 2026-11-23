@@ -32,7 +32,7 @@ homes.to_csv("sold_last_30_days.csv", index=False)
 |---|---|
 | **Sold comps** | `listing_type="sold"`, `past_days=90`, or `location="<address>", radius=0.5` for comps around a home |
 | **Open houses** | `open_house=True` (upcoming), or `open_house_from` / `open_house_to` for a date window |
-| **Listing agent contacts** | every row has `agent_name`, `agent_email`, `agent_phones`, `office_name`, `broker_name` |
+| **Listing agent contacts** | `agent_name`, `agent_email`, `agent_phones`, `office_name`, `broker_name` (when the listing has them) |
 | **Buyer's agent (sold homes)** | `buyer_agent_name`, `buyer_agent_email`, `buyer_agent_phones`, `buyer_office_name` |
 | **Rentals** | `listing_type="for_rent"`, plus `neighborhood_median_rent` and `zip_median_rent` |
 | **Pending / contingent** | `listing_type="pending"` |
