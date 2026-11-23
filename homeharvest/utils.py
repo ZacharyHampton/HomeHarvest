@@ -89,6 +89,9 @@ ordered_properties = [
     "buyer_broker_name",
     "buyer_office_name",
     "nearby_schools",
+    "next_open_house_start",
+    "next_open_house_end",
+    "open_houses",
     "primary_photo",
     "alt_photos"
 ]
@@ -161,6 +164,24 @@ def process_result(result: Property) -> pd.DataFrame:
         if prop_data.get(date_field):
             prop_data[date_field] = prop_data[date_field].strftime("%Y-%m-%d %H:%M:%S") if hasattr(prop_data[date_field], 'strftime') else prop_data[date_field]
     
+    # Open houses: the next one as two columns, and all of them as one readable string
+    open_houses = sorted(
+        (o for o in (getattr(result, "open_houses", None) or []) if getattr(o, "start_date", None)),
+        key=lambda o: o.start_date,
+    )
+    if open_houses:
+        first = open_houses[0]
+        prop_data["next_open_house_start"] = first.start_date.strftime("%Y-%m-%d %H:%M:%S")
+        prop_data["next_open_house_end"] = first.end_date.strftime("%Y-%m-%d %H:%M:%S") if first.end_date else None
+        prop_data["open_houses"] = "; ".join(
+            f"{o.start_date:%Y-%m-%d %H:%M}"
+            + (f"-{o.end_date:%H:%M}" if o.end_date else "")
+            + (f" {o.time_zone}" if o.time_zone else "")
+            for o in open_houses
+        )
+    else:
+        prop_data["next_open_house_start"] = prop_data["next_open_house_end"] = prop_data["open_houses"] = None
+
     # Convert HttpUrl objects to strings for CSV
     if prop_data.get("property_url"):
         prop_data["property_url"] = str(prop_data["property_url"])

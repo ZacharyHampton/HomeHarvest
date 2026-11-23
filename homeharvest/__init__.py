@@ -46,7 +46,7 @@ def scrape_property(
     date_from: datetime | date | str = None,
     date_to: datetime | date | str = None,
     foreclosure: bool = None,
-    extra_property_data: bool = True,
+    extra_property_data: bool = False,
     exclude_pending: bool = False,
     limit: int = 10000,
     offset: int = 0,
@@ -108,9 +108,9 @@ def scrape_property(
         Timezone handling: Naive datetimes are treated as local time and automatically converted to UTC.
         Timezone-aware datetimes are converted to UTC. For best results, use timezone-aware datetimes.
     :param foreclosure: If set, fetches only foreclosure listings.
-    :param extra_property_data: Adds one request per 20 properties. Fetches schools, tax history, assessed value,
+    :param extra_property_data: Default False. Set True to add schools, tax history, assessed value,
         price history, original list price, buyer's agent (sold homes), median rent (neighborhood / zip),
-        and insurance / property tax rates. Set to False for faster searches.
+        and insurance / property tax rates. Costs one extra request per 20 properties (slower).
     :param exclude_pending: If true, this excludes pending or contingent properties from the results, unless listing type is pending.
     :param limit: Limit the number of results returned. Maximum is 10,000.
     :param offset: Starting position for pagination within the 10k limit (offset + limit cannot exceed 10,000). Use with limit to fetch results in chunks (e.g., offset=200, limit=200 fetches results 200-399). Should be a multiple of 200 (page size) for optimal performance. Default is 0. Note: Cannot be used to bypass the 10k API limit - use date ranges (date_from/date_to) to narrow searches and fetch more data.

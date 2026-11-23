@@ -67,10 +67,10 @@ homes = scrape_property(
 )
 print(homes[["formatted_address", "list_price", "agent_name", "agent_phones"]])
 ```
-Use `open_house=True` for any upcoming open house. Open house times are in the `open_houses` field (`return_type="pydantic"` or `"raw"`).
+Use `open_house=True` for any upcoming open house. Each row has `next_open_house_start`, `next_open_house_end` and `open_houses` (every scheduled time). With `return_type="pydantic"` or `"raw"`, `open_houses` is a list of events.
 
 ### Buyer's agent, price history, median rent, insurance
-These come with `extra_property_data=True` (the default). They cost one extra request per 20 homes; set `extra_property_data=False` for big, fast pulls.
+These come with `extra_property_data=True` (off by default). They cost one extra request per 20 homes, so leave it off for big, fast pulls.
 
 ```py
 sold = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30)
@@ -279,7 +279,7 @@ Optional
 │
 ├── proxy (string): In format 'http://user:pass@host:port'
 │
-├── extra_property_data (True/False): Default True. One extra request per 20 homes. Adds schools, tax history,
+├── extra_property_data (True/False): Default False. One extra request per 20 homes. Adds schools, tax history,
 │    assessed value, price history, original list price, buyer's agent (sold), median rent, insurance / tax rates.
 │    Set to False for faster, larger pulls.
 │

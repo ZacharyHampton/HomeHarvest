@@ -1689,7 +1689,7 @@ def test_past_days_with_listing_type_list():
 
 def test_extra_property_data_at_default_page_size():
     """Extra details used to come back empty at 200 per page (the bulk query was too big)."""
-    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=200)
+    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=200, extra_property_data=True)
 
     assert len(result) == 200
     assert result["tax_history"].notna().mean() > 0.8
@@ -1699,14 +1699,14 @@ def test_extra_property_data_at_default_page_size():
 
 def test_buyer_agent_on_sold_homes():
     """#134: buyer's agent on sold listings."""
-    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=40)
+    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=40, extra_property_data=True)
     assert result["buyer_agent_name"].notna().mean() > 0.5
     assert result["buyer_office_name"].notna().any()
 
 
 def test_median_rent_and_insurance():
     """#137 median rent (neighborhood / zip) and #121 insurance rate."""
-    result = scrape_property(location="Dallas, TX", listing_type="for_sale", limit=40)
+    result = scrape_property(location="Dallas, TX", listing_type="for_sale", limit=40, extra_property_data=True)
     assert result["zip_median_rent"].notna().mean() > 0.8
     assert result["insurance_rate"].notna().mean() > 0.8
     assert result["monthly_home_insurance"].notna().any()
@@ -1743,3 +1743,15 @@ def test_offset_returns_the_next_page():
                              sort_by="list_price", extra_property_data=False)
     assert len(second) == 200
     assert len(set(second["property_id"]) & set(first["property_id"].iloc[200:])) > 150
+
+
+def test_open_house_columns_in_default_output():
+    """Open house times show in the default pandas output when filtering by open house."""
+    import datetime as _dt
+    today = _dt.date.today()
+    start = today + _dt.timedelta((5 - today.weekday()) % 7)
+    result = scrape_property(location="Phoenix, AZ", listing_type="for_sale",
+                             open_house_from=start, open_house_to=start + _dt.timedelta(days=1), limit=50)
+    assert len(result) > 0
+    assert result["next_open_house_start"].notna().all()
+    assert result["open_houses"].notna().all()
