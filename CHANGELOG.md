@@ -1,46 +1,50 @@
 # Changelog
 
-## 0.9.1 (unreleased)
+## 2.0.0 (2026-11-23)
+
+A faster release that needs Python 3.11 or newer. 0.9.1 was never published; its changes are part of 2.0.0.
+
+### Upgrading from 0.9 (breaking changes)
+- **Python 3.11 or newer.** Python 3.9 and 3.10 are no longer supported. `httpx2` needs 3.11. On 3.9 or 3.10, pip keeps installing 0.9.0.
+- **`requests` is gone.** HomeHarvest uses `httpx2` (pydantic's maintained fork of httpx). If your code catches `requests.RequestException` around `scrape_property`, catch `homeharvest.NetworkError` instead (an `OSError`; raised after 2 retries on a connection, timeout, proxy or decoding error). A 5xx that keeps failing raises `homeharvest.HTTPStatusError`, a kind of `NetworkError`. `AuthenticationError` and `RateLimitError` are unchanged, but their `.response` is now a small HomeHarvest object (`status_code`, `headers`, `content`, `text`, `json()`), not a `requests.Response`.
+- **SOCKS proxies** need `pip install "httpx2[socks]"` (before, `requests[socks]`). HTTP proxies work as before (`http://user:pass@host:port`). A proxy without a scheme (`host:port` or `user:pass@host:port`) is treated as `http://`.
+- **TLS certificates** are checked against your operating system's trust store (httpx2 uses `truststore`), not the `certifi` bundle. Company CAs installed on the machine are now trusted. `certifi` is no longer installed with HomeHarvest.
+- **`return_type="raw"`** no longer has fields HomeHarvest never mapped: `__typename`, the advertiser `corporation` / `rental_corporation` / `rental_management` objects (always empty), `price_reduced_date`, `median_listing_price` and the school district id.
+- **Request rate:** a search still has at most 4 requests in flight, the same peak as 0.9.0's 4 parallel pages. Extra-data searches now reach that peak too, so they send their requests faster (the same number in less time). If you get rate limited, use `parallel=False`, which fetches pages and details one at a time.
 
 ### Faster
-Median wall time from 3 live runs each, 0.9.0 against 0.9.1 (`scripts/bench.py`, results in `scripts/bench_results/`). The request count is the same, and so is the peak of 4 requests in flight.
+Median wall time, 2 live runs each, 0.9.0 and 2.0.0 run back to back (`scripts/bench.py`; results in `scripts/bench_results/`). The request count is the same.
 
-| Search | 0.9.0 | 0.9.1 |
+| Search | 0.9.0 | 2.0.0 |
 |---|---|---|
-| Dallas sold, `past_days=30`, 200 homes | 2.1s | 2.3s (one page: the server's time) |
-| same, `extra_property_data=True` | 11.7s | 4.8s (6.7s in a slower hour) |
-| Phoenix for sale, 200 homes, extra data | 13.6s | 4.6s |
-| Dallas for rent, 200 homes, extra data | 10.9 to 12.5s (2 runs) | 5.6s |
-| Dallas pending, `past_days=7`, extra data | 12.3s | 6.9s |
-| Phoenix for sale, 1,000 homes | 6.2s | 4.4s |
-| Houston for sale, 2,000 homes | 12.9s | 7.2s |
-| Austin open houses | 0.9s | 0.8s |
+| Dallas sold, `past_days=30`, 200 homes | 2.8s | 1.8s |
+| same, `extra_property_data=True` | 9.8s | 4.6s |
+| Phoenix for sale, 200 homes, extra data | 11.0s | 4.2s |
+| Dallas for rent, 200 homes, extra data | 12.7s | 6.2s |
+| Dallas pending, `past_days=7`, extra data | 10.1s | 5.7s |
+| Phoenix for sale, 1,000 homes | 7.4s | 4.3s |
+| Houston for sale, 2,000 homes | 13.3s | 6.8s |
+| Austin open houses (36 homes) | 0.8s | 0.8s |
 
 - **Extra property details are fetched 4 batches at a time** (they were fetched one at a time). With several pages, page 1's details download while the later pages do. The first batch still goes alone, so a 403 or 429 costs one request, and a block stops every batch that hasn't started. With `parallel=False`, details are still fetched one at a time.
 - **The DataFrame is built once** instead of one frame per home and then concatenated. This cuts about 2 ms of CPU per home to about 0.25 ms (about 4s off a 2,000-row search). The values and dtypes are the same.
 - **Smaller queries.** Fields HomeHarvest doesn't map were removed: `__typename`, the always-empty advertiser `corporation` / `rental_corporation` / `rental_management` objects, `price_reduced_date`, `median_listing_price` and the school district id. The location lookup no longer asks for typeahead results. A detail batch is now 105 KB instead of 137 KB.
 
-### HTTP library: requests → httpx (HTTP/2)
-- HomeHarvest now depends on `httpx[http2]` (BSD-3, pure Python, wheels for every OS and Python 3.9 to 3.14) instead of `requests`. Without a proxy, one search uses one pooled HTTP/2 connection. Before, every request opened a new TCP + TLS connection.
-- Measured live: with 5 detail batches in parallel, HTTP/2 took 1.2 to 1.3s against 1.8 to 2.0s for a pooled `requests.Session`. In end-to-end pairs it was faster in 5 of 8. We saw no 403s or 429s with any library.
-- Not chosen: **niquests** (installing it replaces the `urllib3` that `requests`, boto and others import with urllib3-future). **curl_cffi** (a session can't be shared between threads, so no multiplexing, and it was not faster; its releases after 0.13/0.14 drop Python 3.9; the TLS impersonation made no difference to 403s from our IP). **httpx's sync HTTP/2 client** (it shares one socket between threads unsafely, and 6 of 48 parallel requests failed with "Resource temporarily unavailable"). HomeHarvest uses httpx's async client on a private background thread instead.
+### HTTP library: requests → httpx2 (HTTP/2)
+- HomeHarvest depends on `httpx2[http2]` (BSD-3, pure Python) instead of `requests`. Without a proxy, one search uses one pooled HTTP/2 connection. Before, every request opened a new TCP + TLS connection. With a proxy, each request still opens its own connection, so rotating proxies still give each request a new exit IP.
+- Measured live: with 5 detail batches in parallel, HTTP/2 took 1.2 to 1.3s against 1.8 to 2.0s for a pooled `requests.Session`. We saw no 403s or 429s with any library.
+- Not chosen: **niquests** (installing it replaces the `urllib3` that `requests`, boto and others import with urllib3-future). **curl_cffi** (a session can't be shared between threads, so no multiplexing, and it was not faster; the TLS impersonation made no difference to 403s from our IP).
+- The sync HTTP/2 client of both httpx 0.28 and httpx2 2.16 shares one socket between threads unsafely. Against a local HTTP/2 server, 20 of 4,000 requests from 8 threads failed with "Resource temporarily unavailable" (httpx: 27 of 4,000). HomeHarvest runs httpx2's async client on a private background thread instead, which had no such errors.
 - All HTTP goes through `homeharvest/core/scrapers/http.py`, so the library can change again without touching the scrapers.
 
 ### Reliability
-- Connection, timeout and proxy errors are retried twice. After that they raise `homeharvest.NetworkError`, and a 5xx that is still failing after retries raises `homeharvest.HTTPStatusError`. On a later page or a detail batch, both still give partial results with a `HomeHarvestWarning`.
+- Connection, timeout, proxy and decoding errors are retried twice before `NetworkError` is raised. On a later page or a detail batch, they still give partial results with a `HomeHarvestWarning`.
 - A 429 now pauses every request of the search, not only the one that got it.
-- Homes whose extra details come back with a field error ("The user aborted a request.", which empties that field) are fetched once more. 0.9.0 gets these errors too. In testing, `property_history` came back empty once for 6 of 199 rentals. It didn't happen again in 4 later rental runs, and we haven't confirmed the cause.
-- Network errors on decoding a response are now caught as well (as `NetworkError`), so partial results are kept.
-
-### Behavior notes (check before upgrading)
-- `requests` is no longer installed with HomeHarvest. If your code catches `requests.RequestException` around `scrape_property`, catch `homeharvest.NetworkError` (an `OSError`) instead. `AuthenticationError` and `RateLimitError` are unchanged.
-- Proxies: the `proxy` parameter works as before (`http://user:pass@host:port`). A proxy without a scheme (`host:port` or `user:pass@host:port`) is treated as `http://`. Before, `user:pass@host:port` without a scheme didn't work. With a proxy, each request still opens its own connection, so rotating proxies still give each request a new exit IP. SOCKS proxies need `pip install "httpx[socks]"` (before, `requests[socks]`).
-- `return_type="raw"` no longer has the removed fields listed above.
-- `AuthenticationError.response` and `RateLimitError.response` are now a small HomeHarvest response object (`status_code`, `headers`, `content`, `text`, `json()`), not a `requests.Response`.
-- Up to 4 requests are in flight per search, the same peak as 0.9.0's 4 parallel pages. Extra-data searches now reach that peak too, so they send their requests faster (the same number in less time). If you're rate limited, use `parallel=False`.
+- Homes whose extra details come back with a field error ("The user aborted a request.", which empties that field) are fetched once more. 0.9.0 gets these errors too. In testing, `property_history` came back empty once for 6 of 199 rentals. It didn't happen again in later runs, and we haven't confirmed the cause.
 
 ### Packaging
-- CI: the Python 3.9 job runs on `ubuntu-24.04`, because `ubuntu-latest` (26.04) has no Python 3.9 build.
+- `requires-python = ">=3.11"`, classifiers for 3.11 to 3.14. Dependencies: `httpx2[http2]`, `pandas`, `pydantic`, `tenacity`. `requests` and `eval-type-backport` are no longer dependencies.
+- CI runs the offline tests on Python 3.11 to 3.14 on `ubuntu-latest`.
 - New `scripts/bench.py` (not part of the package): live timings, request counts, bytes and a fill-rate report for every column, compared on the same homes.
 
 ## 0.9.0 (2026-11-23)

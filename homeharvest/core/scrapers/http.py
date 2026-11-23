@@ -2,8 +2,8 @@
 Small HTTP transport used by every scraper request.
 
 The rest of HomeHarvest only sees ``HttpClient.post`` and ``HttpResponse``, so the
-HTTP library can change without touching the scrapers. The current backend is httpx
-with HTTP/2: one pooled connection carries concurrent requests (multiplexed), so
+HTTP library can change without touching the scrapers. The current backend is httpx2
+(pydantic's maintained fork of httpx) with HTTP/2: one pooled connection carries concurrent requests (multiplexed), so
 parallel pages and detail batches share one TLS connection instead of opening one each.
 
 Network failures are raised as ``homeharvest.exceptions.NetworkError`` and HTTP error
@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Mapping
 
-import httpx
+import httpx2
 
 from ...exceptions import NetworkError, HTTPStatusError
 
@@ -56,9 +56,10 @@ class HttpClient:
     One instance is shared by everything a single search does (pages, detail batches),
     so ``max_in_flight`` bounds the total fan-out no matter how many threads call it.
 
-    Requests run on httpx's async HTTP/2 client in one private event-loop thread; callers
-    use the blocking ``post``. (httpx's sync client shares one HTTP/2 socket between
-    threads unsafely: under load reads fail with "Resource temporarily unavailable".)
+    Requests run on httpx2's async HTTP/2 client in one private event-loop thread; callers
+    use the blocking ``post``. (The sync client, in httpx and httpx2 2.16 alike, shares one
+    HTTP/2 socket between threads unsafely: under load reads fail with "Resource
+    temporarily unavailable".)
     """
 
     def __init__(
@@ -79,25 +80,25 @@ class HttpClient:
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
-        self._client: httpx.AsyncClient | None = None
+        self._client: httpx2.AsyncClient | None = None
         self._pause_until = 0.0
 
-    def _new_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
+    def _new_client(self) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(
             http2=True,
             proxy=self.proxy,
             timeout=self.timeout,
-            limits=httpx.Limits(max_connections=self.max_in_flight, max_keepalive_connections=self.max_in_flight),
+            limits=httpx2.Limits(max_connections=self.max_in_flight, max_keepalive_connections=self.max_in_flight),
         )
 
-    def _start(self) -> tuple[asyncio.AbstractEventLoop, httpx.AsyncClient]:
+    def _start(self) -> tuple[asyncio.AbstractEventLoop, httpx2.AsyncClient]:
         with self._lock:
             if self._loop is None:
                 loop = asyncio.new_event_loop()
                 thread = threading.Thread(target=loop.run_forever, name="homeharvest-http", daemon=True)
                 thread.start()
 
-                async def make_client() -> httpx.AsyncClient:
+                async def make_client() -> httpx2.AsyncClient:
                     return self._new_client()
 
                 try:
@@ -110,7 +111,7 @@ class HttpClient:
                 self._loop, self._thread, self._client = loop, thread, client
             return self._loop, self._client
 
-    async def _post(self, client: httpx.AsyncClient, url: str, data, headers, fresh: bool) -> HttpResponse:
+    async def _post(self, client: httpx2.AsyncClient, url: str, data, headers, fresh: bool) -> HttpResponse:
         if fresh:  #: one-off connection (with a rotating proxy: a new exit IP)
             async with self._new_client() as one_off:
                 response = await one_off.post(url, content=data, headers=headers)
@@ -134,7 +135,7 @@ class HttpClient:
             future = asyncio.run_coroutine_threadsafe(self._post(client, url, data, headers, fresh), loop)
             try:
                 return future.result()
-            except httpx.RequestError as exc:  #: connect / read / timeout / protocol / proxy / decoding errors
+            except httpx2.RequestError as exc:  #: connect / read / timeout / protocol / proxy / decoding errors
                 raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
 
     # ---- shared back-off: when one request is told to slow down (429), every thread waits

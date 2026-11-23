@@ -13,7 +13,7 @@ Give it a city, ZIP code, or address. Get back a clean table (pandas), typed mod
 ```bash
 pip install -U homeharvest
 ```
-_Python 3.9 or newer._
+_Python 3.11 or newer._
 
 ## Quick start
 
@@ -42,6 +42,10 @@ homes.to_csv("sold_last_30_days.csv", index=False)
 Export to CSV / Excel, or use `return_type="pydantic"` / `"raw"`. Filter by beds, baths, price, sqft, lot size, year built, and date (hours, days, or a range). Sort by price, date, size, or last update.
 
 ![homeharvest](https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/b3d5d727-e67b-4a9f-85d8-1e65fd18620a)
+
+## New in 2.0.0
+
+HomeHarvest 2.0.0 is faster: searches with `extra_property_data=True` take about half the time, and pulls of 1,000 to 2,000 homes take 40 to 50% less time. It now needs **Python 3.11 or newer** and uses `httpx2` instead of `requests`. If you catch network errors, catch `homeharvest.NetworkError`. See the [changelog](CHANGELOG.md) for the upgrade notes.
 
 ## New in 0.9.0
 

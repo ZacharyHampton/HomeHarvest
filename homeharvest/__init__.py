@@ -17,7 +17,7 @@ from .exceptions import (
 )
 from typing import Union, Optional, List
 
-__version__ = "0.9.1"  #: keep in sync with pyproject.toml
+__version__ = "2.0.0"  #: keep in sync with pyproject.toml
 
 
 def _to_date_string(value, name: str) -> str | None:

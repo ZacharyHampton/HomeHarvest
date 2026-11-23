@@ -458,12 +458,12 @@ def test_proxy_without_scheme_is_http():
 
 
 def test_http_errors_become_network_errors():
-    import httpx
+    import httpx2
 
     client = HttpClient()
 
     async def broken(self, http, url, data, headers, fresh):
-        raise httpx.DecodingError("bad gzip")
+        raise httpx2.DecodingError("bad gzip")
 
     client._post = broken.__get__(client)
     try:
