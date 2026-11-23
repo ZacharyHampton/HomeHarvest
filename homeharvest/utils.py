@@ -32,6 +32,11 @@ ordered_properties = [
     "list_price",
     "list_price_min",
     "list_price_max",
+    "previous_list_price",
+    "original_list_price",
+    "last_price_change_amount",
+    "last_price_change_date",
+    "price_reduced_amount",
     "list_date",
     "pending_date",
     "sold_price",
@@ -43,6 +48,7 @@ ordered_properties = [
     "estimated_value",
     "tax",
     "tax_history",
+    "property_history",
     "new_construction",
     "lot_sqft",
     "price_per_sqft",
@@ -51,8 +57,13 @@ ordered_properties = [
     "neighborhoods",
     "county",
     "fips_code",
+    "neighborhood_median_rent",
+    "zip_median_rent",
     "stories",
     "hoa_fee",
+    "insurance_rate",
+    "property_tax_rate",
+    "monthly_home_insurance",
     "parking_garage",
     "agent_id",
     "agent_name",
@@ -69,6 +80,14 @@ ordered_properties = [
     "office_name",
     "office_email",
     "office_phones",
+    "buyer_agent_id",
+    "buyer_agent_name",
+    "buyer_agent_email",
+    "buyer_agent_phones",
+    "buyer_agent_mls_set",
+    "buyer_agent_nrds_id",
+    "buyer_broker_name",
+    "buyer_office_name",
     "nearby_schools",
     "primary_photo",
     "alt_photos"
@@ -118,12 +137,27 @@ def process_result(result: Property) -> pd.DataFrame:
             prop_data["office_phones"] = office_data.get("phones")
             prop_data["office_mls_set"] = office_data.get("mls_set")
 
+        if advertiser_data.get("buyer_agent"):
+            buyer_data = advertiser_data["buyer_agent"]
+            prop_data["buyer_agent_id"] = buyer_data.get("uuid")
+            prop_data["buyer_agent_name"] = buyer_data.get("name")
+            prop_data["buyer_agent_email"] = buyer_data.get("email")
+            prop_data["buyer_agent_phones"] = buyer_data.get("phones")
+            prop_data["buyer_agent_mls_set"] = buyer_data.get("mls_set")
+            prop_data["buyer_agent_nrds_id"] = buyer_data.get("nrds_id")
+
+        if advertiser_data.get("buyer_broker"):
+            prop_data["buyer_broker_name"] = advertiser_data["buyer_broker"].get("name")
+
+        if advertiser_data.get("buyer_office"):
+            prop_data["buyer_office_name"] = advertiser_data["buyer_office"].get("name")
+
     prop_data["price_per_sqft"] = prop_data["prc_sqft"]
     prop_data["nearby_schools"] = filter(None, prop_data["nearby_schools"]) if prop_data["nearby_schools"] else None
     prop_data["nearby_schools"] = ", ".join(set(prop_data["nearby_schools"])) if prop_data["nearby_schools"] else None
     
     # Convert datetime objects to strings for CSV (preserve full datetime including time)
-    for date_field in ["list_date", "pending_date", "last_sold_date", "last_status_change_date"]:
+    for date_field in ["list_date", "pending_date", "last_sold_date", "last_status_change_date", "last_price_change_date"]:
         if prop_data.get(date_field):
             prop_data[date_field] = prop_data[date_field].strftime("%Y-%m-%d %H:%M:%S") if hasattr(prop_data[date_field], 'strftime') else prop_data[date_field]
     

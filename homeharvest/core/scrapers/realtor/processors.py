@@ -2,6 +2,8 @@
 Processors for realtor.com property data processing
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from ..models import (
@@ -28,13 +30,69 @@ from .parsers import (
 )
 
 
+def _parse_fulfillment_id(fulfillment_id: str | None) -> str | None:
+    return fulfillment_id if fulfillment_id and fulfillment_id != "0" else None
+
+
+def _to_int(value) -> int | None:
+    """Round a numeric API value (often a float) to int, keeping None."""
+    if value is None:
+        return None
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO date / datetime string from the API into a naive datetime."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return None
+
+
+def process_buyers(buyers: list[dict] | None, advertisers: Advertisers | None) -> Advertisers | None:
+    """Attach the buyer's agent (Home.buyers) to the Advertisers model."""
+    if not buyers:
+        return advertisers
+
+    buyer = next((b for b in buyers if b and b.get("type") == "buyer"), None) or next((b for b in buyers if b), None)
+    if not buyer:
+        return advertisers
+
+    advertisers = advertisers or Advertisers()
+    advertisers.buyer_agent = Agent(
+        uuid=_parse_fulfillment_id(buyer.get("fulfillment_id")),
+        nrds_id=buyer.get("nrds_id"),
+        mls_set=buyer.get("mls_set"),
+        name=buyer.get("name"),
+        email=buyer.get("email"),
+        phones=buyer.get("phones"),
+        state_license=buyer.get("state_license"),
+    )
+    if buyer.get("broker") and buyer["broker"].get("name"):
+        advertisers.buyer_broker = Broker(
+            uuid=_parse_fulfillment_id(buyer["broker"].get("fulfillment_id")),
+            name=buyer["broker"].get("name"),
+        )
+    if buyer.get("office") and buyer["office"].get("name"):
+        advertisers.buyer_office = Office(
+            uuid=_parse_fulfillment_id(buyer["office"].get("fulfillment_id")),
+            name=buyer["office"].get("name"),
+        )
+    return advertisers
+
+
 def process_advertisers(advertisers: list[dict] | None) -> Advertisers | None:
     """Process advertisers data from GraphQL response"""
     if not advertisers:
         return None
-
-    def _parse_fulfillment_id(fulfillment_id: str | None) -> str | None:
-        return fulfillment_id if fulfillment_id and fulfillment_id != "0" else None
 
     processed_advertisers = Advertisers()
 
@@ -105,6 +163,16 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
     estimated_value = get_key_func(property_estimates_root, [0, "estimate"]) if get_key_func else None
 
     advertisers = process_advertisers(result.get("advertisers"))
+    if extra_property_data:
+        advertisers = process_buyers(result.get("buyers"), advertisers)
+
+    list_price = result["list_price"]
+    last_price_change_amount = _to_int(result.get("last_price_change_amount"))
+    previous_list_price = (
+        _to_int(list_price - last_price_change_amount)
+        if list_price is not None and last_price_change_amount
+        else None
+    )
 
     realty_property = Property(
         mls=mls,
@@ -143,7 +211,22 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
         advertisers=advertisers,
         tax=prop_details.get("tax"),
         tax_history=prop_details.get("tax_history"),
-        
+
+        # Price changes
+        last_price_change_amount=last_price_change_amount,
+        last_price_change_date=_parse_datetime(result.get("last_price_change_date")),
+        price_reduced_amount=_to_int(result.get("price_reduced_amount")),
+        previous_list_price=previous_list_price,
+        original_list_price=prop_details.get("original_list_price"),
+        property_history=prop_details.get("property_history"),
+
+        # Area / cost estimates
+        neighborhood_median_rent=prop_details.get("neighborhood_median_rent"),
+        zip_median_rent=prop_details.get("zip_median_rent"),
+        insurance_rate=prop_details.get("insurance_rate"),
+        property_tax_rate=prop_details.get("property_tax_rate"),
+        monthly_home_insurance=prop_details.get("monthly_home_insurance"),
+
         # Additional fields from GraphQL
         mls_status=result.get("mls_status"),
         last_sold_price=result.get("last_sold_price"),
@@ -164,6 +247,24 @@ def process_property(result: dict, mls_only: bool = False, extra_property_data: 
         photos=result.get("photos"),
         flags=result.get("flags"),
     )
+
+    # Sold listings: realtor.com sometimes re-creates the listing record after the sale
+    # (e.g. MLS feed migrations), so list_date becomes the record creation time and lands
+    # *after* the sold date (issue #159). Recover the real list date from property history
+    # when we have it, otherwise drop the misleading value.
+    if (
+        realty_property.status == "SOLD"
+        and realty_property.list_date
+        and realty_property.last_sold_date
+        and realty_property.list_date.date() > realty_property.last_sold_date.date()
+    ):
+        recovered = prop_details.get("listing_start_date")
+        if recovered and recovered.date() <= realty_property.last_sold_date.date():
+            realty_property.list_date = recovered
+            realty_property.days_on_mls = (realty_property.last_sold_date.date() - recovered.date()).days
+        else:
+            realty_property.list_date = None
+            realty_property.days_on_mls = None
 
     # Enhance date precision using last_status_change_date
     # pending_date and last_sold_date only have day-level precision
@@ -230,11 +331,103 @@ def process_extra_property_details(result: dict, get_key_func=None) -> dict:
                     }
                 processed_tax_history.append(processed_entry)
 
+    listing_event = _find_listing_event(result)
+
     return {
         "schools": schools if schools else None,
         "assessed_value": assessed_value if assessed_value else None,
         "tax": latest_tax,
         "tax_history": processed_tax_history,
+        "property_history": _process_property_history(result.get("property_history")),
+        "original_list_price": _to_int(listing_event.get("price")) if listing_event and listing_event.get("price") else None,
+        "listing_start_date": _parse_datetime(listing_event.get("date")) if listing_event else None,
+        "neighborhood_median_rent": _neighborhood_median_rent(result),
+        "zip_median_rent": _to_int(_housing_market(get_key(result, ["location", "postal_code"])).get("median_rent_price")),
+        **_process_mortgage(result.get("mortgage")),
+    }
+
+
+def _process_property_history(history: list[dict] | None) -> list[dict] | None:
+    if not history:
+        return None
+    events = []
+    for event in history:
+        if not event:
+            continue
+        events.append({
+            "date": _parse_datetime(event.get("date")),
+            "event_name": event.get("event_name"),
+            "price": _to_int(event.get("price")),
+            "price_change": _to_int(event.get("price_change")),
+            "source_name": event.get("source_name"),
+            "source_listing_id": event.get("source_listing_id"),
+        })
+    return events or None
+
+
+def _find_listing_event(result: dict) -> dict | None:
+    """Find the property_history event where the current listing went live.
+
+    Prefers the earliest "Listed"/"Relisted" event that shares the current MLS listing id,
+    otherwise the most recent listing event (before the sale, for sold homes).
+    """
+    history = [e for e in (result.get("property_history") or []) if e and e.get("date")]
+    if not history:
+        return None
+
+    is_rental = (result.get("status") or "").lower() == "for_rent"
+
+    def is_listing_event(name: str | None) -> bool:
+        name = (name or "").lower()
+        if not (name.startswith("listed") or name == "relisted"):
+            return False
+        return ("rent" in name) == is_rental
+
+    candidates = [e for e in history if is_listing_event(e.get("event_name"))]
+
+    sold_date = result.get("last_sold_date")
+    if (result.get("status") or "").lower() == "sold" and sold_date:
+        candidates = [e for e in candidates if e["date"][:10] <= sold_date[:10]]
+
+    if not candidates:
+        return None
+
+    source = result.get("source") if isinstance(result.get("source"), dict) else {}
+    mls_id = source.get("listing_id") if source else None
+    same_listing = [e for e in candidates if mls_id and e.get("source_listing_id") == mls_id]
+    if same_listing:
+        return min(same_listing, key=lambda e: e["date"])
+
+    return max(candidates, key=lambda e: e["date"])
+
+
+def _housing_market(geo: dict | None) -> dict:
+    if not geo or not isinstance(geo, dict):
+        return {}
+    return get_key(geo, ["geo_statistics", "housing_market"]) or {}
+
+
+def _neighborhood_median_rent(result: dict) -> int | None:
+    for neighborhood in get_key(result, ["location", "neighborhoods"]) or []:
+        rent = _housing_market(neighborhood).get("median_rent_price")
+        if rent:
+            return _to_int(rent)
+    return None
+
+
+def _process_mortgage(mortgage: dict | None) -> dict:
+    if not mortgage or not isinstance(mortgage, dict):
+        return {"insurance_rate": None, "property_tax_rate": None, "monthly_home_insurance": None}
+
+    monthly_home_insurance = None
+    for detail in get_key(mortgage, ["estimate", "monthly_payment_details"]) or []:
+        if detail and detail.get("type") == "home_insurance":
+            monthly_home_insurance = _to_int(detail.get("amount"))
+
+    return {
+        "insurance_rate": mortgage.get("insurance_rate"),
+        "property_tax_rate": mortgage.get("property_tax_rate"),
+        "monthly_home_insurance": monthly_home_insurance,
     }
 
 

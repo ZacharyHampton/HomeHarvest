@@ -7,7 +7,12 @@ This module implements the scraper for realtor.com
 
 from __future__ import annotations
 
+import copy
 import json
+import logging
+import random
+import time
+import warnings
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import JSONDecodeError
@@ -22,24 +27,46 @@ from tenacity import (
 )
 
 from .. import Scraper, DEFAULT_HEADERS
-from ....exceptions import AuthenticationError
+from ....exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning
 from ..models import (
     Property,
     ListingType,
     ReturnType
 )
-from .queries import GENERAL_RESULTS_QUERY, HOMES_DATA, SEARCH_SUGGESTIONS_QUERY
+from .queries import GENERAL_RESULTS_QUERY, HOMES_DATA, SEARCH_SUGGESTIONS_QUERY, EXTRA_PROPERTY_FRAGMENT
 from .processors import (
     process_property,
     process_extra_property_details,
     get_key
 )
 
+logger = logging.getLogger("homeharvest")
+
+#: Errors that mean "this request failed, but results fetched so far are still good".
+RECOVERABLE_ERRORS = (AuthenticationError, RateLimitError, requests.RequestException, JSONDecodeError)
+
+#: Listing types searched when listing_type=None and a date filter is used.
+#: OFF_MARKET has no list/sold date to filter on, so it is left out in that case.
+DATED_LISTING_TYPES = [
+    ListingType.FOR_SALE,
+    ListingType.FOR_RENT,
+    ListingType.SOLD,
+    ListingType.PENDING,
+]
+
 
 class RealtorScraper(Scraper):
     SEARCH_GQL_URL = "https://www.realtor.com/frontdoor/graphql"
-    NUM_PROPERTY_WORKERS = 20
+    NUM_PROPERTY_WORKERS = 20  #: CPU-only parsing threads (no network)
     DEFAULT_PAGE_SIZE = 200
+
+    #: Politeness / resilience settings
+    MAX_PAGE_WORKERS = 4  #: max concurrent page requests when parallel=True
+    DETAIL_BATCH_SIZE = 20  #: properties per extra-details request (the API rejects large queries)
+    MAX_RETRIES = 5  #: retries for 429 / 5xx responses
+    BACKOFF_BASE = 1.0  #: seconds; doubles every retry
+    BACKOFF_CAP = 30.0  #: max seconds to wait between retries
+    RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
     def __init__(self, scraper_input):
         super().__init__(scraper_input)
@@ -50,9 +77,29 @@ class RealtorScraper(Scraper):
         # Split on whitespace, filter empty strings, join with single space
         return ' '.join(query.split())
 
+    @staticmethod
+    def _sleep(seconds: float) -> None:
+        time.sleep(seconds)
+
+    def _backoff_seconds(self, attempt: int, response: requests.Response | None = None) -> float:
+        """Exponential backoff with full jitter, honoring Retry-After when the server sends it."""
+        if response is not None:
+            retry_after = response.headers.get("Retry-After") if response.headers else None
+            if retry_after:
+                try:
+                    return min(self.BACKOFF_CAP, max(0.0, float(retry_after))) + random.uniform(0, 1)
+                except ValueError:
+                    pass
+        delay = min(self.BACKOFF_CAP, self.BACKOFF_BASE * (2 ** attempt))
+        return delay / 2 + random.uniform(0, delay / 2)
+
     def _graphql_post(self, query: str, variables: dict, operation_name: str) -> dict:
         """
         Execute a GraphQL query.
+
+        Retries 429 / 5xx responses with exponential backoff and jitter. Raises
+        RateLimitError if the server is still rate limiting after MAX_RETRIES, and
+        AuthenticationError on 403 Forbidden.
 
         Args:
             query: GraphQL query string (must include operationName matching operation_name param)
@@ -67,29 +114,55 @@ class RealtorScraper(Scraper):
             "query": self._minify_query(query),
             "variables": variables,
         }
+        body = json.dumps(payload, separators=(',', ':'))
 
-        response = requests.post(
-            self.SEARCH_GQL_URL,
-            headers=DEFAULT_HEADERS,
-            data=json.dumps(payload, separators=(',', ':')),
-            proxies=self.proxies
-        )
+        #: with a rotating proxy a 403 can clear up on the next request, so retry it a little
+        max_forbidden_retries = 2 if self.proxy else 0
+        forbidden_retries = 0
+        attempt = 0
 
-        if response.status_code == 403:
-            if not self.proxy:
+        while True:
+            response = requests.post(
+                self.SEARCH_GQL_URL,
+                headers=DEFAULT_HEADERS,
+                data=body,
+                proxies=self.proxies,
+                timeout=60,
+            )
+
+            if response.status_code in self.RETRY_STATUS_CODES:
+                if attempt >= self.MAX_RETRIES:
+                    if response.status_code == 429:
+                        raise RateLimitError(
+                            f"Rate limited (429 Too Many Requests) after {self.MAX_RETRIES} retries. "
+                            "Wait a few minutes, use a proxy, or use parallel=False.",
+                            response=response,
+                        )
+                    response.raise_for_status()
+                delay = self._backoff_seconds(attempt, response)
+                logger.info("HTTP %s from %s, retrying in %.1fs", response.status_code, operation_name, delay)
+                self._sleep(delay)
+                attempt += 1
+                continue
+
+            if response.status_code == 403:
+                if forbidden_retries < max_forbidden_retries:
+                    forbidden_retries += 1
+                    self._sleep(self._backoff_seconds(forbidden_retries))
+                    continue
                 raise AuthenticationError(
-                    "Received 403 Forbidden from Realtor.com API.",
-                    response=response
+                    "Received 403 Forbidden from the property data API. "
+                    "You may be blocked for sending too many requests; wait a bit, use a proxy, or use parallel=False.",
+                    response=response,
                 )
-            else:
-                raise Exception("Received 403 Forbidden, retrying...")
 
-        return response.json()
+            return response.json()
 
     @retry(
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_not_exception_type((AuthenticationError, RateLimitError)),
         wait=wait_exponential(multiplier=1, min=1, max=4),
         stop=stop_after_attempt(3),
+        reraise=True,
     )
     def handle_location(self):
         variables = {
@@ -395,6 +468,8 @@ class RealtorScraper(Scraper):
         else:
             status_param = ""  # No status parameter means return all types
 
+        open_house_param = self._open_house_param()
+
         is_foreclosure = ""
 
         if variables.get("foreclosure") is True:
@@ -420,6 +495,7 @@ class RealtorScraper(Scraper):
                                 %s
                                 %s
                                 %s
+                                %s
                             }
                             %s
                             limit: 200
@@ -432,6 +508,7 @@ class RealtorScraper(Scraper):
                 property_type_param,
                 property_filters_param,
                 pending_or_contingent_param,
+                open_house_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
             )
@@ -444,6 +521,7 @@ class RealtorScraper(Scraper):
                                     query: {
                                         %s
                                         search_location: $search_location
+                                        %s
                                         %s
                                         %s
                                         %s
@@ -462,6 +540,7 @@ class RealtorScraper(Scraper):
                 property_type_param,
                 property_filters_param,
                 pending_or_contingent_param,
+                open_house_param,
                 bucket_param,
                 sort_param,
                 GENERAL_RESULTS_QUERY,
@@ -503,10 +582,11 @@ class RealtorScraper(Scraper):
         offset = variables.get("offset", 0)
 
         #: limit the number of properties to be processed
-        #: example, if your offset is 200, and your limit is 250, return 50
-        properties_list: list[dict] = properties_list[: self.limit - offset]
+        #: example: offset=0, limit=250 -> the page at offset 200 keeps 50;
+        #: offset=200, limit=200 -> the page at offset 200 keeps all 200
+        properties_list: list[dict] = properties_list[: self.offset + self.limit - offset]
 
-        if self.extra_property_data:
+        if self.extra_property_data and properties_list:
             property_ids = [data["property_id"] for data in properties_list]
             extra_property_details = self.get_bulk_prop_details(property_ids) or {}
 
@@ -548,37 +628,167 @@ class RealtorScraper(Scraper):
             "properties": properties,
         }
 
+    def _open_house_param(self) -> str:
+        """Server-side open house filter (only listings with an open house in the window)."""
+        if self.open_house_from or self.open_house_to:
+            min_date = self.open_house_from or "$today"
+            if self.open_house_to:
+                return f'open_house: {{ min: "{min_date}", max: "{self.open_house_to}" }}'
+            return f'open_house: {{ min: "{min_date}" }}'
+        if self.open_house:
+            return 'open_house: { min: "$today" }'
+        return ""
+
+    def _has_date_filter(self) -> bool:
+        return bool(self.last_x_days or self.past_hours or self.date_from or self.date_to)
+
+    def _split_listing_types(self) -> list[ListingType] | None:
+        """Listing types to search one at a time, or None for a single combined search.
+
+        Each listing type filters on a different date (sold_date for sold, list_date for
+        for_sale / for_rent, pending_date client-side for pending), so a date filter with
+        several listing types needs one search per type (issue #143).
+        """
+        if not self._has_date_filter():
+            return None
+        if self.listing_type is None:
+            return list(DATED_LISTING_TYPES)
+        if isinstance(self.listing_type, list) and len(self.listing_type) > 1:
+            return list(dict.fromkeys(self.listing_type))  #: dedupe, keep order
+        return None
+
     def search(self):
         location_info = self.handle_location()
         if not location_info:
             return []
 
+        if location_info["area_type"] == "address" and not self.radius:  #: single address search, non comps
+            return self.handle_home(location_info["mpr_id"])
+
+        #: a one-item list behaves exactly like a single listing type
+        if isinstance(self.listing_type, list) and len(self.listing_type) == 1:
+            self.listing_type = self.listing_type[0]
+
+        split_types = self._split_listing_types()
+        if split_types:
+            return self._search_each_listing_type(location_info, split_types)
+
+        return self._search_location(location_info)
+
+    def _search_each_listing_type(self, location_info: dict, listing_types: list[ListingType]):
+        """Run one search per listing type (each with its own date field), merge, dedupe on property_id."""
+        merged = []
+        seen = set()
+
+        for listing_type in listing_types:
+            child = copy.copy(self)
+            child.listing_type = listing_type
+            child.sort_by = self.sort_by
+            child.sort_direction = self.sort_direction
+
+            #: same auto-sort scrape_property applies for a lone PENDING search
+            if (
+                listing_type == ListingType.PENDING
+                and not self.sort_by
+                and not (self.updated_since or self.updated_in_past_hours)
+            ):
+                child.sort_by = "pending_date"
+                child.sort_direction = "desc"
+
+            for home in child._search_location(location_info):
+                property_id = home.get("property_id") if isinstance(home, dict) else getattr(home, "property_id", None)
+                if property_id in seen:
+                    continue
+                seen.add(property_id)
+                merged.append(home)
+
+        if self.sort_by:
+            merged = self._apply_sort(merged)
+
+        return merged[: self.limit]
+
+    def _fetch_remaining_pages(self, homes: list, search_variables: dict, search_type: str, total: int) -> list:
+        """Fetch pages after the first. If a page fails (403, 429, network), keep what was
+        already fetched, warn, and stop instead of losing the whole search."""
+        offsets = list(range(
+            self.offset + self.DEFAULT_PAGE_SIZE,
+            min(total, self.offset + self.limit),
+            self.DEFAULT_PAGE_SIZE,
+        ))
+        if not offsets:
+            return homes
+
+        failures: list[tuple[int, Exception]] = []
+
+        def fetch(page_offset: int):
+            return self.general_search(
+                variables=search_variables | {"offset": page_offset},
+                search_type=search_type,
+            )
+
+        if self.parallel:
+            pages: dict[int, list] = {}
+            with ThreadPoolExecutor(max_workers=self.MAX_PAGE_WORKERS) as executor:
+                futures = {executor.submit(fetch, page_offset): page_offset for page_offset in offsets}
+                for future in as_completed(futures):
+                    page_offset = futures[future]
+                    if future.cancelled():
+                        continue
+                    try:
+                        pages[page_offset] = future.result()["properties"]
+                    except RECOVERABLE_ERRORS as exc:
+                        failures.append((page_offset, exc))
+                        #: stop hammering the API: drop pages that haven't started yet
+                        for other in futures:
+                            other.cancel()
+
+            for page_offset in sorted(pages):  #: preserve API sort order
+                homes.extend(pages[page_offset])
+            skipped = len(offsets) - len(pages) - len(failures)
+        else:
+            skipped = 0
+            for index, page_offset in enumerate(offsets):
+                # Check if we should continue based on time-based filters
+                if not self._should_fetch_more_pages(homes):
+                    break
+                try:
+                    homes.extend(fetch(page_offset)["properties"])
+                except RECOVERABLE_ERRORS as exc:
+                    failures.append((page_offset, exc))
+                    skipped = len(offsets) - index - 1
+                    break
+
+        if failures:
+            first_error = failures[0][1]
+            missing_pages = len(failures) + skipped
+            warnings.warn(
+                f"HomeHarvest stopped early: {missing_pages} of {len(offsets) + 1} result pages could not be "
+                f"fetched ({type(first_error).__name__}: {first_error}). Returning the {len(homes)} properties "
+                f"fetched so far. Try again later, use a proxy, or use parallel=False.",
+                HomeHarvestWarning,
+                stacklevel=4,
+            )
+        return homes
+
+    def _search_location(self, location_info: dict):
         location_type = location_info["area_type"]
 
         search_variables = {
             "offset": self.offset,
         }
 
-        search_type = (
-            "comps"
-            if self.radius and location_type == "address"
-            else "address" if location_type == "address" and not self.radius else "area"
-        )
-        if location_type == "address":
-            if not self.radius:  #: single address search, non comps
-                property_id = location_info["mpr_id"]
-                return self.handle_home(property_id)
+        search_type = "comps" if location_type == "address" else "area"
 
-            else:  #: general search, comps (radius)
-                if not location_info.get("centroid"):
-                    return []
+        if location_type == "address":  #: general search, comps (radius)
+            if not location_info.get("centroid"):
+                return []
 
-                centroid = location_info["centroid"]
-                coordinates = [centroid["lon"], centroid["lat"]]  # GeoJSON order: [lon, lat]
-                search_variables |= {
-                    "coordinates": coordinates,
-                    "radius": "{}mi".format(self.radius),
-                }
+            centroid = location_info["centroid"]
+            coordinates = [centroid["lon"], centroid["lat"]]  # GeoJSON order: [lon, lat]
+            search_variables |= {
+                "coordinates": coordinates,
+                "radius": "{}mi".format(self.radius),
+            }
 
         else:  #: general search (city, county, postal_code, etc.)
             search_variables |= {
@@ -592,49 +802,9 @@ class RealtorScraper(Scraper):
         total = result["total"]
         homes = result["properties"]
 
-        # Fetch remaining pages based on parallel parameter
+        # Fetch remaining pages (parallel or sequential), keeping partial results on errors
         if self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit):
-            if self.parallel:
-                # Parallel mode: Fetch all remaining pages in parallel
-                with ThreadPoolExecutor() as executor:
-                    futures_with_offsets = [
-                        (i, executor.submit(
-                            self.general_search,
-                            variables=search_variables | {"offset": i},
-                            search_type=search_type,
-                        ))
-                        for i in range(
-                            self.offset + self.DEFAULT_PAGE_SIZE,
-                            min(total, self.offset + self.limit),
-                            self.DEFAULT_PAGE_SIZE,
-                        )
-                    ]
-
-                    # Collect results and sort by offset to preserve API sort order
-                    results = []
-                    for offset, future in futures_with_offsets:
-                        results.append((offset, future.result()["properties"]))
-
-                    results.sort(key=lambda x: x[0])
-                    for offset, properties in results:
-                        homes.extend(properties)
-            else:
-                # Sequential mode: Fetch pages one by one with early termination checks
-                for current_offset in range(
-                    self.offset + self.DEFAULT_PAGE_SIZE,
-                    min(total, self.offset + self.limit),
-                    self.DEFAULT_PAGE_SIZE,
-                ):
-                    # Check if we should continue based on time-based filters
-                    if not self._should_fetch_more_pages(homes):
-                        break
-
-                    result = self.general_search(
-                        variables=search_variables | {"offset": current_offset},
-                        search_type=search_type,
-                    )
-                    page_properties = result["properties"]
-                    homes.extend(page_properties)
+            homes = self._fetch_remaining_pages(homes, search_variables, search_type, total)
 
         # Apply client-side hour-based filtering if needed
         # (API only supports day-level filtering, so we post-filter for hour precision)
@@ -1103,40 +1273,70 @@ class RealtorScraper(Scraper):
         return filtered_homes
 
 
-    @retry(
-        retry=retry_if_exception_type((JSONDecodeError, Exception)) & retry_if_not_exception_type(AuthenticationError),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        stop=stop_after_attempt(3),
-    )
+    def _fetch_detail_batch(self, property_ids: list[str]) -> dict:
+        """One request for up to DETAIL_BATCH_SIZE homes, using a shared fragment to keep the query small."""
+        aliases = " ".join(
+            f"home_{property_id}: home(property_id: {property_id}) {{ ...HomeExtraData }}"
+            for property_id in property_ids
+        )
+        query = f"query GetHomeDetails {{ {aliases} }} {EXTRA_PROPERTY_FRAGMENT}"
+
+        data = self._graphql_post(query, {}, "GetHomeDetails")
+
+        #: transient "Required parameter is missing" errors: try once more
+        if not data.get("data") and any(
+            "Required parameter is missing" in (error.get("message") or "") for error in data.get("errors") or []
+        ):
+            self._sleep(self._backoff_seconds(0))
+            data = self._graphql_post(query, {}, "GetHomeDetails")
+
+        return data
+
     def get_bulk_prop_details(self, property_ids: list[str]) -> dict:
         """
-        Fetch extra property details for multiple properties in a single GraphQL query.
-        Returns a map of property_id to its details.
+        Fetch extra property details (schools, tax history, buyer's agent, price history, ...)
+        in batches of DETAIL_BATCH_SIZE. Returns a map of property_id to its details.
+
+        Problems are reported with a HomeHarvestWarning instead of silently returning nothing.
         """
         if not self.extra_property_data or not property_ids:
             return {}
 
-        property_ids = list(set(property_ids))
+        property_ids = list(dict.fromkeys(property_ids))  #: dedupe, keep order
+        details: dict[str, dict] = {}
+        error_messages: list[str] = []
+        missing = 0
 
-        fragments = "\n".join(
-            f'home_{property_id}: home(property_id: {property_id}) {HOMES_DATA}'
-            for property_id in property_ids
-        )
-        query = f"""query GetHome {{
-    {fragments}
-}}"""
+        for start in range(0, len(property_ids), self.DETAIL_BATCH_SIZE):
+            batch = property_ids[start:start + self.DETAIL_BATCH_SIZE]
+            try:
+                data = self._fetch_detail_batch(batch)
+            except (AuthenticationError, RateLimitError) as exc:
+                #: blocked: stop asking for more details, keep the search results
+                missing += len(property_ids) - start
+                error_messages.append(f"{type(exc).__name__}: {exc}")
+                break
+            except RECOVERABLE_ERRORS as exc:
+                missing += len(batch)
+                error_messages.append(f"{type(exc).__name__}: {exc}")
+                continue
 
-        data = self._graphql_post(query, {}, "GetHome")
+            homes = data.get("data") or {}
+            for error in data.get("errors") or []:
+                error_messages.append(error.get("message") or str(error))
 
-        if "data" not in data or data["data"] is None:
-            # If we got a 400 error with "Required parameter is missing", raise to trigger retry
-            if data and "errors" in data:
-                error_msgs = [e.get("message", "") for e in data.get("errors", [])]
-                if any("Required parameter is missing" in msg for msg in error_msgs):
-                    raise Exception(f"Transient API error: {error_msgs}")
-            return {}
+            found = {key[len("home_"):]: value for key, value in homes.items() if value}
+            if not found:
+                missing += len(batch)
+            details.update(found)
 
-        properties = data["data"]
-        return {key.replace('home_', ''): properties[key] for key in properties if properties[key]}
+        if error_messages:
+            unique = list(dict.fromkeys(error_messages))
+            message = (
+                f"Extra property details (schools, tax history, buyer's agent, ...) are missing for {missing} of "
+                f"{len(property_ids)} properties. API error: {'; '.join(unique[:3])}"
+            )
+            logger.warning(message)
+            warnings.warn(message, HomeHarvestWarning, stacklevel=2)
 
-
+        return details

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 import pandas as pd
 from datetime import datetime, timedelta, date
@@ -9,7 +11,28 @@ from .utils import (
 )
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
+from .exceptions import (
+    InvalidListingType, InvalidDate, AuthenticationError, RateLimitError, HomeHarvestWarning
+)
 from typing import Union, Optional, List
+
+__version__ = "0.9.0"  #: keep in sync with pyproject.toml
+
+
+def _to_date_string(value, name: str) -> str | None:
+    """Accept date / datetime / 'YYYY-MM-DD' string and return 'YYYY-MM-DD'."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            pass
+    raise InvalidDate(f"Invalid {name}: {value!r}. Expected a date, datetime, or 'YYYY-MM-DD' string.")
 
 def scrape_property(
     location: str,
@@ -50,9 +73,14 @@ def scrape_property(
     sort_direction: str = "desc",
     # Pagination control
     parallel: bool = True,
+    # Open houses
+    open_house: bool = None,
+    open_house_from: datetime | date | str = None,
+    open_house_to: datetime | date | str = None,
 ) -> Union[pd.DataFrame, list[dict], list[Property]]:
     """
-    Scrape properties from Realtor.com based on a given location and listing type.
+    Get US property data (for sale, sold, pending, rentals, open houses, agent contacts)
+    for a location.
 
     :param location: Location to search (e.g. "Dallas, TX", "85281", "2530 Al Lipscomb Way")
     :param listing_type: Listing Type - can be a string, list of strings, or None.
@@ -67,6 +95,9 @@ def scrape_property(
         - PENDING: Filters by pending_date. Contingent properties without pending_date are included.
         - SOLD: Filters by sold_date (when property was sold)
         - FOR_SALE/FOR_RENT: Filters by list_date (when property was listed)
+        - None or a list: each type is searched with its own date field and the results are merged
+          (deduped on property_id). With listing_type=None this covers for_sale, for_rent, sold and pending
+          (off_market has no date to filter on, so it is left out).
     :param date_from, date_to: Get properties sold or listed (dependent on your listing_type) between these dates.
         Accepts multiple formats for flexible precision:
         - Date strings: "2025-01-20" (day-level precision)
@@ -77,7 +108,9 @@ def scrape_property(
         Timezone handling: Naive datetimes are treated as local time and automatically converted to UTC.
         Timezone-aware datetimes are converted to UTC. For best results, use timezone-aware datetimes.
     :param foreclosure: If set, fetches only foreclosure listings.
-    :param extra_property_data: Increases requests by O(n). If set, this fetches additional property data (e.g. agent, broker, property evaluations etc.)
+    :param extra_property_data: Adds one request per 20 properties. Fetches schools, tax history, assessed value,
+        price history, original list price, buyer's agent (sold homes), median rent (neighborhood / zip),
+        and insurance / property tax rates. Set to False for faster searches.
     :param exclude_pending: If true, this excludes pending or contingent properties from the results, unless listing type is pending.
     :param limit: Limit the number of results returned. Maximum is 10,000.
     :param offset: Starting position for pagination within the 10k limit (offset + limit cannot exceed 10,000). Use with limit to fetch results in chunks (e.g., offset=200, limit=200 fetches results 200-399). Should be a multiple of 200 (page size) for optimal performance. Default is 0. Note: Cannot be used to bypass the 10k API limit - use date ranges (date_from/date_to) to narrow searches and fetch more data.
@@ -98,7 +131,10 @@ def scrape_property(
     :param year_built_min, year_built_max: Filter by year built
     :param sort_by: Sort results by field (list_date, sold_date, list_price, sqft, beds, baths, last_update_date)
     :param sort_direction: Sort direction (asc, desc)
-    :param parallel: Controls pagination strategy. True (default) = fetch all pages in parallel for maximum speed.
+    :param open_house: If True, only return listings with an upcoming open house (from today on).
+    :param open_house_from, open_house_to: Only return listings with an open house in this date window
+        (dates, datetimes, or 'YYYY-MM-DD'). Either one implies open_house=True.
+    :param parallel: Controls pagination strategy. True (default) = fetch pages concurrently (up to 4 at a time).
         False = fetch pages sequentially with early termination checks (useful for rate limiting or narrow time windows).
         Sequential mode will stop paginating as soon as time-based filters indicate no more matches are possible.
 
@@ -133,6 +169,11 @@ def scrape_property(
 
     # Validate converted dates
     validate_dates(converted_date_from, converted_date_to)
+
+    converted_open_house_from = _to_date_string(open_house_from, "open_house_from")
+    converted_open_house_to = _to_date_string(open_house_to, "open_house_to")
+    if converted_open_house_from and converted_open_house_to and converted_open_house_to < converted_open_house_from:
+        raise InvalidDate(f"open_house_to ('{open_house_to}') must be after open_house_from ('{open_house_from}').")
 
     # Convert datetime/timedelta objects to appropriate formats
     converted_past_days = extract_timedelta_days(past_days)
@@ -197,6 +238,10 @@ def scrape_property(
         sort_direction=sort_direction,
         # Pagination control
         parallel=parallel,
+        # Open houses
+        open_house=open_house,
+        open_house_from=converted_open_house_from,
+        open_house_to=converted_open_house_to,
     )
 
     site = RealtorScraper(scraper_input)

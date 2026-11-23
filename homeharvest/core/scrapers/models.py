@@ -174,6 +174,11 @@ class Advertisers(BaseModel):
     builder: Builder | None = None
     office: Office | None = None
 
+    # Buyer side (usually only present on sold listings, requires extra_property_data)
+    buyer_agent: Agent | None = Field(None, description="Buyer's agent on a sold listing")
+    buyer_broker: Broker | None = None
+    buyer_office: Office | None = None
+
 
 class Property(BaseModel):
     property_url: HttpUrl
@@ -218,7 +223,22 @@ class Property(BaseModel):
     tax_history: list[TaxHistory] | None = None
 
     advertisers: Advertisers | None = None
-    
+
+    # Price changes
+    last_price_change_amount: int | None = Field(None, description="Amount of the most recent price change (negative = price cut)")
+    last_price_change_date: datetime | None = None
+    price_reduced_amount: int | None = Field(None, description="Amount of the most recent price reduction")
+    previous_list_price: int | None = Field(None, description="List price before the most recent price change")
+    original_list_price: int | None = Field(None, description="Price when the current listing first went live (from property history, requires extra_property_data)")
+    property_history: list[PropertyHistoryEvent] | None = Field(None, description="Listing / sale / price change events (requires extra_property_data)")
+
+    # Area and cost estimates (require extra_property_data)
+    neighborhood_median_rent: int | None = Field(None, description="Median rent in the home's neighborhood")
+    zip_median_rent: int | None = Field(None, description="Median rent in the home's zip code")
+    insurance_rate: float | None = Field(None, description="Estimated yearly home insurance as a fraction of price (e.g. 0.0099)")
+    property_tax_rate: float | None = Field(None, description="Estimated yearly property tax as a fraction of price")
+    monthly_home_insurance: int | None = Field(None, description="Estimated monthly home insurance cost")
+
     # Additional fields from GraphQL that aren't currently parsed
     mls_status: str | None = None
     last_sold_price: int | None = None
@@ -299,6 +319,15 @@ class PopularityPeriod(BaseModel):
 
 class Popularity(BaseModel):
     periods: list[PopularityPeriod] | None = None
+
+
+class PropertyHistoryEvent(BaseModel):
+    date: datetime | None = None
+    event_name: str | None = None
+    price: int | None = None
+    price_change: int | None = None
+    source_name: str | None = None
+    source_listing_id: str | None = None
 
 
 class Assessment(BaseModel):

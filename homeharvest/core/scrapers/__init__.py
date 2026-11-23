@@ -77,6 +77,11 @@ class ScraperInput(BaseModel):
     # Pagination control
     parallel: bool = True
 
+    # Open house filtering (server-side)
+    open_house: bool | None = None
+    open_house_from: str | None = None
+    open_house_to: str | None = None
+
 
 class Scraper:
     def __init__(
@@ -98,7 +103,7 @@ class Scraper:
         self.date_from_precision = scraper_input.date_from_precision
         self.date_to_precision = scraper_input.date_to_precision
         self.foreclosure = scraper_input.foreclosure
-        self.extra_property_data = False  # TODO: temporarily disabled
+        self.extra_property_data = scraper_input.extra_property_data
         self.exclude_pending = scraper_input.exclude_pending
         self.limit = scraper_input.limit
         self.offset = scraper_input.offset
@@ -131,6 +136,11 @@ class Scraper:
 
         # Pagination control
         self.parallel = scraper_input.parallel
+
+        # Open house filtering
+        self.open_house = scraper_input.open_house
+        self.open_house_from = scraper_input.open_house_from
+        self.open_house_to = scraper_input.open_house_to
 
     def search(self) -> list[Union[Property | dict]]: ...
 
