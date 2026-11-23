@@ -1,8 +1,16 @@
+"""
+Live tests: these call the real property data API (slow, need network, results drift with live data).
+Run offline tests only with: pytest tests/test_unit.py   (or: pytest -m "not live")
+"""
+
 import pytz
+import pytest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from homeharvest import scrape_property, Property
 import pandas as pd
+
+pytestmark = pytest.mark.live
 
 
 def test_realtor_pending_or_contingent():
@@ -93,7 +101,8 @@ def test_listing_type_none_includes_sold():
     # Get properties with listing_type=None (should include all common types)
     result_none = scrape_property(
         location="Warren, MI",
-        listing_type=None
+        listing_type=None,
+        extra_property_data=False,
     )
 
     # Verify we got results
@@ -1581,7 +1590,7 @@ def test_basic_last_update_date():
 
     properties = scrape_property(
         "California",
-        updated_since=now - timedelta(minutes=10),
+        updated_since=now - timedelta(hours=2),
         sort_by="last_update_date",
         sort_direction="desc"
     )
@@ -1605,7 +1614,7 @@ def test_timezone_aware_last_update_date():
 
     properties = scrape_property(
         "California",
-        updated_since=now_utc - timedelta(minutes=10),
+        updated_since=now_utc - timedelta(hours=2),
         sort_by="last_update_date",
         sort_direction="desc"
     )
@@ -1638,3 +1647,98 @@ def test_timezone_handling_date_range():
         now_utc = now.astimezone(tz=pytz.timezone("UTC"))
         assert (properties["pending_date"] <= now_utc).all()
 
+
+
+# ---------------------------------------------------------------- 0.9.0
+
+
+def _recent(series, days):
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=days)
+    return (pd.to_datetime(series) >= cutoff).all()
+
+
+def test_past_days_with_listing_type_none():
+    """#143: past_days used to be ignored when listing_type was None (returned up to 10,000 homes)."""
+    result = scrape_property(location="Warren, MI", past_days=2, extra_property_data=False)
+
+    assert 0 < len(result) < 2000
+    assert not result["property_id"].duplicated().any()
+
+    #: each listing type is filtered on its own date (+1 day slack for time zones)
+    for status, column in [("SOLD", "last_sold_date"), ("FOR_SALE", "list_date"), ("FOR_RENT", "list_date")]:
+        rows = result[result["status"] == status]
+        if len(rows):
+            assert _recent(rows[column], 3), f"{status} rows outside past_days window"
+
+
+def test_past_days_with_listing_type_list():
+    """#143: same for a list of listing types."""
+    result = scrape_property(
+        location="Warren, MI", listing_type=["sold", "for_sale"], past_days=7, extra_property_data=False
+    )
+    everything = scrape_property(location="Warren, MI", listing_type=["sold", "for_sale"], limit=1000,
+                                 extra_property_data=False)
+
+    assert 0 < len(result) < len(everything)
+    assert set(result["status"]) <= {"SOLD", "FOR_SALE", "PENDING", "CONTINGENT"}
+    sold = result[result["status"] == "SOLD"]
+    if len(sold):
+        assert _recent(sold["last_sold_date"], 8)
+
+
+def test_extra_property_data_at_default_page_size():
+    """Extra details used to come back empty at 200 per page (the bulk query was too big)."""
+    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=200)
+
+    assert len(result) == 200
+    assert result["tax_history"].notna().mean() > 0.8
+    assert result["nearby_schools"].notna().mean() > 0.8
+    assert result["property_history"].notna().mean() > 0.8
+
+
+def test_buyer_agent_on_sold_homes():
+    """#134: buyer's agent on sold listings."""
+    result = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30, limit=40)
+    assert result["buyer_agent_name"].notna().mean() > 0.5
+    assert result["buyer_office_name"].notna().any()
+
+
+def test_median_rent_and_insurance():
+    """#137 median rent (neighborhood / zip) and #121 insurance rate."""
+    result = scrape_property(location="Dallas, TX", listing_type="for_sale", limit=40)
+    assert result["zip_median_rent"].notna().mean() > 0.8
+    assert result["insurance_rate"].notna().mean() > 0.8
+    assert result["monthly_home_insurance"].notna().any()
+
+
+def test_price_change_fields():
+    """#120 (partial): previous list price from the last price change."""
+    result = scrape_property(location="Dallas, TX", listing_type="for_sale", limit=200, extra_property_data=False)
+    changed = result[result["last_price_change_amount"].notna()]
+    assert len(changed) > 0
+    assert (changed["previous_list_price"] == changed["list_price"] - changed["last_price_change_amount"]).all()
+
+
+def test_open_house_filter():
+    result = scrape_property(location="Dallas, TX", listing_type="for_sale", open_house=True,
+                             extra_property_data=False, return_type="pydantic")
+    assert len(result) > 0
+    assert all(prop.open_houses for prop in result)
+
+
+def test_sold_list_date_not_after_sold_date():
+    """#159: list_date for sold homes must not be later than the sold date."""
+    result = scrape_property(location="Miami, FL", listing_type="sold", date_from="2026-04-01",
+                             date_to="2026-06-30", limit=400, extra_property_data=False)
+    rows = result.dropna(subset=["list_date", "last_sold_date"])
+    assert len(result) > 0
+    assert (pd.to_datetime(rows["list_date"]).dt.date <= pd.to_datetime(rows["last_sold_date"]).dt.date).all()
+
+
+def test_offset_returns_the_next_page():
+    first = scrape_property(location="Dallas, TX", listing_type="for_sale", limit=400, sort_by="list_price",
+                            extra_property_data=False)
+    second = scrape_property(location="Dallas, TX", listing_type="for_sale", offset=200, limit=200,
+                             sort_by="list_price", extra_property_data=False)
+    assert len(second) == 200
+    assert len(set(second["property_id"]) & set(first["property_id"].iloc[200:])) > 150
