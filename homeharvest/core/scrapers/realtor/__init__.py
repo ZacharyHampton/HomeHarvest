@@ -68,6 +68,9 @@ class RealtorScraper(Scraper):
     BACKOFF_CAP = 30.0  #: max seconds to wait between retries
     RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
+    #: sort fields the search API accepts (pending_date is sorted client-side only)
+    SERVER_SORT_FIELDS = {"list_date", "sold_date", "list_price", "sqft", "beds", "baths", "last_update_date"}
+
     def __init__(self, scraper_input):
         super().__init__(scraper_input)
 
@@ -424,9 +427,10 @@ class RealtorScraper(Scraper):
 
         property_filters_param = "\n".join(property_filters)
 
-        # Build sort parameter
-        if self.sort_by:
-            sort_param = f"sort: [{{ field: {self.sort_by}, direction: {self.sort_direction} }}]"
+        # Build sort parameter (fields the API rejects, like pending_date, are sorted client-side only)
+        server_sort_by = self.sort_by if self.sort_by in self.SERVER_SORT_FIELDS else None
+        if server_sort_by:
+            sort_param = f"sort: [{{ field: {server_sort_by}, direction: {self.sort_direction} }}]"
         elif isinstance(self.listing_type, ListingType) and self.listing_type == ListingType.SOLD:
             sort_param = "sort: [{ field: sold_date, direction: desc }]"
         else:
@@ -444,7 +448,7 @@ class RealtorScraper(Scraper):
 
         # Build bucket parameter (only use fractal sort if no custom sort is specified)
         bucket_param = ""
-        if not self.sort_by:
+        if not server_sort_by:
             bucket_param = 'bucket: { sort: "fractal_v1.1.3_fr" }'
 
         # Build status parameter
@@ -586,47 +590,64 @@ class RealtorScraper(Scraper):
         #: offset=200, limit=200 -> the page at offset 200 keeps all 200
         properties_list: list[dict] = properties_list[: self.offset + self.limit - offset]
 
-        if self.extra_property_data and properties_list:
-            property_ids = [data["property_id"] for data in properties_list]
-            extra_property_details = self.get_bulk_prop_details(property_ids) or {}
+        if self.extra_property_data and not self._defer_extra_property_data:
+            self._merge_extra_details(properties_list)
 
-            for result in properties_list:
-                specific_details_for_property = extra_property_details.get(result["property_id"], {})
-
-                #: address is retrieved on both homes and search homes, so when merged, homes overrides,
-                # this gets the internal data we want and only updates that (migrate to a func if more fields)
-                if "location" in specific_details_for_property:
-                    result["location"].update(specific_details_for_property["location"])
-                    del specific_details_for_property["location"]
-
-                result.update(specific_details_for_property)
-
-        if self.return_type != ReturnType.raw:
-            with ThreadPoolExecutor(max_workers=self.NUM_PROPERTY_WORKERS) as executor:
-                # Store futures with their indices to maintain sort order
-                futures_with_indices = [
-                    (i, executor.submit(process_property, result, self.mls_only, self.extra_property_data,
-                                       self.exclude_pending, self.listing_type, get_key, process_extra_property_details))
-                    for i, result in enumerate(properties_list)
-                ]
-
-                # Collect results and sort by index to preserve API sort order
-                results = []
-                for idx, future in futures_with_indices:
-                    result = future.result()
-                    if result:
-                        results.append((idx, result))
-
-                # Sort by index and extract properties in correct order
-                results.sort(key=lambda x: x[0])
-                properties = [result for idx, result in results]
-        else:
-            properties = properties_list
+        properties = self._process_results(properties_list)
 
         return {
             "total": total_properties,
             "properties": properties,
         }
+
+    #: set on the inner search of _search_pending_with_dates: fetch raw, enrich later
+    _defer_extra_property_data = False
+
+    def _merge_extra_details(self, properties_list: list[dict]) -> None:
+        """Fetch extra details for raw search results and merge them in place."""
+        if not properties_list:
+            return
+        property_ids = [data["property_id"] for data in properties_list]
+        extra_property_details = self.get_bulk_prop_details(property_ids) or {}
+
+        for result in properties_list:
+            specific_details_for_property = dict(extra_property_details.get(result["property_id"], {}))
+
+            #: address is retrieved on both homes and search homes, so when merged, homes overrides,
+            # this gets the internal data we want and only updates that (migrate to a func if more fields)
+            if "location" in specific_details_for_property:
+                result["location"].update(specific_details_for_property["location"])
+                del specific_details_for_property["location"]
+
+            result.update(specific_details_for_property)
+
+    def _process_results(self, properties_list: list[dict]) -> list:
+        """Turn raw results into Property models (unless return_type is raw), keeping API order."""
+        if self.return_type == ReturnType.raw or self._defer_extra_property_data:
+            return properties_list
+
+        with ThreadPoolExecutor(max_workers=self.NUM_PROPERTY_WORKERS) as executor:
+            futures = [
+                executor.submit(process_property, result, self.mls_only, self.extra_property_data,
+                                self.exclude_pending, self.listing_type, get_key, process_extra_property_details)
+                for result in properties_list
+            ]
+            return [prop for prop in (future.result() for future in futures) if prop]
+
+    def _search_pending_with_dates(self, location_info: dict):
+        """PENDING + date filter: the API can't filter or sort on pending_date, so fetch the pending
+        listings raw, filter them client-side, and only then fetch extra details for the survivors."""
+        inner = copy.copy(self)
+        inner._defer_extra_property_data = True
+        homes = inner._search_location(location_info)  #: raw dicts, already date-filtered
+
+        if self.extra_property_data:
+            self._merge_extra_details(homes)
+
+        homes = self._process_results(homes)
+        if self.sort_by:
+            homes = self._apply_sort(homes)
+        return homes
 
     def _open_house_param(self) -> str:
         """Server-side open house filter (only listings with an open house in the window)."""
@@ -695,7 +716,23 @@ class RealtorScraper(Scraper):
                 child.sort_by = "pending_date"
                 child.sort_direction = "desc"
 
-            for home in child._search_location(location_info):
+            try:
+                child_homes = child._search_location(location_info)
+            except RECOVERABLE_ERRORS as exc:
+                if not merged:
+                    raise
+                done = listing_types.index(listing_type)
+                warnings.warn(
+                    f"HomeHarvest stopped early: the {listing_type.value.lower()} search failed "
+                    f"({type(exc).__name__}: {exc}). Returning the {len(merged)} properties from "
+                    f"{', '.join(lt.value.lower() for lt in listing_types[:done])}; skipped "
+                    f"{', '.join(lt.value.lower() for lt in listing_types[done:])}.",
+                    HomeHarvestWarning,
+                    stacklevel=3,
+                )
+                break
+
+            for home in child_homes:
                 property_id = home.get("property_id") if isinstance(home, dict) else getattr(home, "property_id", None)
                 if property_id in seen:
                     continue
@@ -771,6 +808,13 @@ class RealtorScraper(Scraper):
         return homes
 
     def _search_location(self, location_info: dict):
+        if (
+            self.listing_type == ListingType.PENDING
+            and self._has_date_filter()
+            and not self._defer_extra_property_data
+        ):
+            return self._search_pending_with_dates(location_info)
+
         location_type = location_info["area_type"]
 
         search_variables = {
@@ -827,7 +871,7 @@ class RealtorScraper(Scraper):
 
         # Apply raw data filters (exclude_pending and mls_only) for raw return type
         # These filters are normally applied in process_property() but are bypassed for raw data
-        if self.return_type == ReturnType.raw:
+        if self.return_type == ReturnType.raw or self._defer_extra_property_data:
             homes = self._apply_raw_data_filters(homes)
 
         return homes
@@ -957,10 +1001,11 @@ class RealtorScraper(Scraper):
         filtered_homes = []
         
         for home in homes:
-            # Extract the best available date for this property
-            property_date = self._extract_property_date_for_filtering(home)
-            
-            # Handle properties without dates (include contingent properties)
+            # pending_date, falling back to last_status_change_date (when a contingent
+            # listing without a pending_date went contingent)
+            property_date = self._extract_date_from_home(home, 'pending_date')
+
+            # Handle properties without any date (include contingent properties)
             if property_date is None:
                 if self._is_contingent(home):
                     filtered_homes.append(home)  # Include contingent without date filter
@@ -1143,27 +1188,6 @@ class RealtorScraper(Scraper):
                 cutoff_datetime = (datetime.now(timezone.utc) - timedelta(hours=self.updated_in_past_hours)).replace(tzinfo=None)
                 date_range = {'type': 'since', 'date': cutoff_datetime}
             else:
-                return True
-
-            return self._is_datetime_in_range(last_date, date_range)
-
-        # Check for PENDING date filters
-        if (self.listing_type == ListingType.PENDING and
-            (self.last_x_days or self.past_hours or self.date_from) and
-            self.sort_by == "pending_date"):
-
-            if not first_page:
-                return False
-
-            last_property = first_page[-1]
-            last_date = self._extract_date_from_home(last_property, 'pending_date')
-
-            if not last_date:
-                return True
-
-            # Build date range for pending date filter
-            date_range = self._get_date_range()
-            if not date_range:
                 return True
 
             return self._is_datetime_in_range(last_date, date_range)

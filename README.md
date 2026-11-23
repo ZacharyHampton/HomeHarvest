@@ -21,8 +21,9 @@ _Python 3.9 or newer._
 from homeharvest import scrape_property
 
 homes = scrape_property(location="San Diego, CA", listing_type="sold", past_days=30)
-homes.to_csv("sold_last_30_days.csv", index=False)
 print(len(homes), "homes sold in the last 30 days")
+print(homes[["formatted_address", "sold_price", "agent_name", "agent_phones"]].head())
+homes.to_csv("sold_last_30_days.csv", index=False)
 ```
 
 ## What you can get
@@ -52,6 +53,8 @@ Export to CSV / Excel, or use `return_type="pydantic"` / `"raw"`. Filter by beds
 homes = scrape_property(location="Warren, MI", past_days=1)
 ```
 With `listing_type=None` and a date filter, HomeHarvest searches for_sale, for_rent, sold and pending (off_market has no date to filter on).
+
+`listing_type="pending"` with `past_days` or dates works again too (0.8.x returned no homes).
 
 ### Open houses
 ```py

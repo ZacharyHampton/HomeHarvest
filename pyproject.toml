@@ -35,7 +35,6 @@ classifiers = [
     "Topic :: Office/Business",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Typing :: Typed",
 ]
 dependencies = [
     "requests>=2.32.4,<3.0.0",
@@ -59,7 +58,7 @@ packages = [{ include = "homeharvest" }]
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
 pytz = ">=2024.1"
-pre-commit = "^3.5.0"
+pre-commit = "^3.7.0"
 
 [tool.pytest.ini_options]
 markers = [

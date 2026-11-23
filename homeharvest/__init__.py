@@ -92,7 +92,7 @@ def scrape_property(
     :param mls_only: If set, fetches only listings with MLS IDs.
     :param proxy: Proxy to use for scraping
     :param past_days: Get properties sold or listed (dependent on your listing_type) in the last _ days.
-        - PENDING: Filters by pending_date. Contingent properties without pending_date are included.
+        - PENDING: Filters by pending_date (contingent listings without one: last_status_change_date), client-side.
         - SOLD: Filters by sold_date (when property was sold)
         - FOR_SALE/FOR_RENT: Filters by list_date (when property was listed)
         - None or a list: each type is searched with its own date field and the results are merged
@@ -187,9 +187,8 @@ def scrape_property(
         if not sort_direction:
             sort_direction = "desc"  # Most recent first
 
-    # Auto-apply optimal sort for PENDING listings with date filters
-    # PENDING API filtering is broken, so we rely on client-side filtering
-    # Sorting by pending_date ensures efficient pagination with early termination
+    # PENDING listings with date filters: the API can't filter or sort on pending_date,
+    # so results are filtered and sorted (most recent first) client-side
     elif (converted_listing_type == ListingType.PENDING and
           (converted_past_days or converted_past_hours or converted_date_from) and
           not sort_by):

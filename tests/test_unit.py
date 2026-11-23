@@ -129,6 +129,62 @@ def test_each_listing_type_uses_its_own_date_field_and_results_are_deduped():
     assert sorted(ids) == ["1", "2", "3", "4"]  #: property 2 came back twice, kept once
 
 
+def test_blocked_listing_type_keeps_earlier_types():
+    scraper = make_scraper(listing_type=None, last_x_days=7)
+
+    def fake_post(query, variables, operation_name):
+        if "status: sold" in query:
+            raise AuthenticationError("Received 403 Forbidden", response=None)
+        results = [make_home(len(query) % 1000)]
+        return {"data": {"homeSearch": {"total": 1, "count": 1, "results": results}}}
+
+    scraper._graphql_post = fake_post
+    with pytest.warns(HomeHarvestWarning, match="sold search failed"):
+        homes = scraper.search()
+    assert len(homes) >= 1  #: for_sale / for_rent results kept
+
+
+def test_blocked_first_listing_type_raises():
+    scraper = make_scraper(listing_type=None, last_x_days=7)
+
+    def fake_post(query, variables, operation_name):
+        raise AuthenticationError("Received 403 Forbidden", response=None)
+
+    scraper._graphql_post = fake_post
+    with pytest.raises(AuthenticationError):
+        scraper.search()
+
+
+def test_pending_with_dates_filters_before_fetching_details():
+    """The API rejects sort/filter on pending_date: filter client-side, then enrich only the matches."""
+    scraper = make_scraper(listing_type=ListingType.PENDING, last_x_days=7, sort_by="pending_date",
+                           extra_property_data=True, return_type=ReturnType.pydantic)
+    searches, detail_ids = [], []
+    recent = "2099-01-01T00:00:00Z"  #: always inside the window
+    results = [
+        make_home(1, pending_date=recent, flags={"is_pending": True}),
+        make_home(2, pending_date="2000-01-01T00:00:00Z", flags={"is_pending": True}),
+        make_home(3, last_status_change_date=recent, flags={"is_contingent": True}),
+        make_home(4, last_status_change_date="2000-01-01T00:00:00Z", flags={"is_contingent": True}),
+    ]
+
+    def fake_post(query, variables, operation_name):
+        if operation_name == "GetHomeDetails":
+            ids = re.findall(r"home_(\d+):", query)
+            detail_ids.extend(ids)
+            return {"data": {f"home_{pid}": {"property_id": pid} for pid in ids}}
+        searches.append(query)
+        return {"data": {"homeSearch": {"total": len(results), "count": len(results),
+                                        "results": [dict(r) for r in results]}}}
+
+    scraper._graphql_post = fake_post
+    homes = scraper.search()
+
+    assert "field: pending_date" not in searches[0]
+    assert sorted(h.property_id for h in homes) == ["1", "3"]
+    assert sorted(detail_ids) == ["1", "3"]  #: no details fetched for filtered-out homes
+
+
 def test_one_item_list_is_a_single_type():
     scraper = make_scraper(listing_type=[ListingType.SOLD], last_x_days=3)
     queries = []
