@@ -1644,8 +1644,9 @@ def test_timezone_handling_date_range():
     # Verify we got results and they're within the date range
     if len(properties) > 0:
         # Convert now to UTC for comparison
-        now_utc = now.astimezone(tz=pytz.timezone("UTC"))
-        assert (properties["pending_date"] <= now_utc).all()
+        #: pending_date is a naive "YYYY-MM-DD HH:MM:SS" string in UTC; allow a minute of clock skew
+        now_utc = now.astimezone(tz=pytz.timezone("UTC")).replace(tzinfo=None) + timedelta(minutes=1)
+        assert (pd.to_datetime(properties["pending_date"].dropna()) <= now_utc).all()
 
 
 

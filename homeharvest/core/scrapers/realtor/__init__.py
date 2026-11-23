@@ -1354,7 +1354,10 @@ class RealtorScraper(Scraper):
                 missing += len(batch)
             details.update(found)
 
-        if error_messages:
+        if error_messages and not missing:
+            #: errors on individual fields, but every home came back: not worth a warning
+            logger.info("Extra property details returned partial errors: %s", error_messages[:3])
+        elif error_messages:
             unique = list(dict.fromkeys(error_messages))
             message = (
                 f"Extra property details (schools, tax history, buyer's agent, ...) are missing for {missing} of "

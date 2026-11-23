@@ -242,6 +242,17 @@ def test_extra_details_stop_when_blocked():
     assert len(calls) == 1  #: no hammering after a 403
 
 
+def test_extra_details_partial_field_errors_do_not_warn():
+    scraper = make_scraper(extra_property_data=True)
+    scraper._graphql_post = lambda *a: {
+        "data": {"home_1": {"property_id": "1"}},
+        "errors": [{"message": "The user aborted a request."}],
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HomeHarvestWarning)
+        assert scraper.get_bulk_prop_details(["1"]) == {"1": {"property_id": "1"}}
+
+
 def test_extra_property_data_parameter_is_honored():
     assert make_scraper(extra_property_data=True).extra_property_data is True
     assert make_scraper(extra_property_data=False).extra_property_data is False
