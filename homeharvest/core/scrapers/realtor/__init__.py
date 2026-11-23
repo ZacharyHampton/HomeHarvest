@@ -1362,6 +1362,32 @@ class RealtorScraper(Scraper):
 
         return data
 
+    @staticmethod
+    def _errored_property_id(error: dict) -> str | None:
+        """property_id of the home a GraphQL error is about (path starts with its home_<id> alias)."""
+        path = error.get("path") or []
+        if path and isinstance(path[0], str) and path[0].startswith("home_"):
+            return path[0][len("home_"):]
+        return None
+
+    def _refetch_partial_details(self, property_ids: list[str]) -> dict:
+        """Fetch homes again whose details came back with field errors; keep the copies without errors."""
+        fixed = {}
+        for start in range(0, len(property_ids), self.DETAIL_BATCH_SIZE):
+            batch = property_ids[start:start + self.DETAIL_BATCH_SIZE]
+            try:
+                data = self._fetch_detail_batch(batch)
+            except RECOVERABLE_ERRORS:
+                break  #: keep what we have
+            still_bad = {self._errored_property_id(error) for error in data.get("errors") or []}
+            for key, home in (data.get("data") or {}).items():
+                property_id = key[len("home_"):]
+                if home and property_id not in still_bad:
+                    fixed[property_id] = home
+        if fixed:
+            logger.info("Fetched details again for %d of %d homes with field errors", len(fixed), len(property_ids))
+        return fixed
+
     def get_bulk_prop_details(self, property_ids: list[str]) -> dict:
         """
         Fetch extra property details (schools, tax history, buyer's agent, price history, ...)
@@ -1423,6 +1449,19 @@ class RealtorScraper(Scraper):
             if not found:
                 missing += len(batch)
             details.update(found)
+
+        #: the API sometimes gives up on a field for some homes ("The user aborted a request.")
+        #: and returns it empty: ask once more for just those homes
+        partial = [
+            pid for pid in dict.fromkeys(
+                self._errored_property_id(error)
+                for status, value in outcomes if status == "ok"
+                for error in value.get("errors") or []
+            )
+            if pid in details
+        ]
+        if partial and not blocked.is_set():
+            details.update(self._refetch_partial_details(partial))
 
         if error_messages and not missing:
             #: errors on individual fields, but every home came back: not worth a warning

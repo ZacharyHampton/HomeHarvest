@@ -569,3 +569,33 @@ def test_one_dataframe_matches_concatenating_one_frame_per_home():
 
     pd.testing.assert_frame_equal(new, old)
     assert properties_to_dataframe([]).empty
+
+
+def test_homes_with_field_errors_are_fetched_again_once():
+    """'The user aborted a request.' leaves a field empty for some homes: ask again for just those."""
+    scraper = make_scraper(extra_property_data=True)
+    calls = []
+
+    def fake_post(query, variables, operation_name):
+        ids = [pid for pid, _ in re.findall(r"home_(\d+): home\(property_id: (\d+)\)", query)]
+        calls.append(ids)
+        if len(calls) == 1:  #: first pass: homes 2 and 3 lose property_history
+            return {
+                "data": {f"home_{pid}": {"property_id": pid, "property_history": None if pid in "23" else [{"event_name": "Sold"}]} for pid in ids},
+                "errors": [
+                    {"message": "The user aborted a request.", "path": ["home_2", "property_history"]},
+                    {"message": "The user aborted a request.", "path": ["home_3", "property_history"]},
+                ],
+            }
+        #: retry: home 2 comes back whole, home 3 fails again
+        return {
+            "data": {f"home_{pid}": {"property_id": pid, "property_history": None if pid == "3" else [{"event_name": "Sold"}]} for pid in ids},
+            "errors": [{"message": "The user aborted a request.", "path": ["home_3", "property_history"]}],
+        }
+
+    scraper._graphql_post = fake_post
+    details = scraper.get_bulk_prop_details(["1", "2", "3"])
+
+    assert calls == [["1", "2", "3"], ["2", "3"]]  #: one retry, only for the homes with errors
+    assert details["2"]["property_history"] == [{"event_name": "Sold"}]
+    assert details["3"]["property_history"] is None  #: still bad: the first copy is kept
