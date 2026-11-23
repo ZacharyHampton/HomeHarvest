@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import statistics
 import sys
 import threading
@@ -103,6 +104,20 @@ class Meter:
 
 
 METER = Meter()
+
+
+class LogCapture(logging.Handler):
+    """Keeps HomeHarvest's log lines (partial API errors, retries, re-fetches) for the current run."""
+
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append(record.getMessage()[:300])
+
+
+LOGS = LogCapture()
 
 
 def _timed(original):
@@ -192,6 +207,8 @@ def signatures(df) -> dict:
 
 def run(args):
     instrumented = instrument()
+    logging.getLogger("homeharvest").addHandler(LOGS)
+    logging.getLogger("homeharvest").setLevel(logging.INFO)
     import homeharvest
     from homeharvest import scrape_property
 
@@ -213,6 +230,7 @@ def run(args):
         runs = []
         for i in range(args.runs):
             METER.reset()
+            LOGS.lines = []
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 t0 = time.perf_counter()
@@ -238,6 +256,9 @@ def run(args):
                 },
                 "op_counts": {op: len(v) for op, v in METER.ops.items()},
                 "warnings": hh_warnings,
+                "log": LOGS.lines[:20],
+                "partial_error_logs": sum("partial errors" in line for line in LOGS.lines),
+                "refetches": sum("Fetched details again" in line for line in LOGS.lines),
                 "error": error,
                 "tainted": bool(error or hh_warnings or bad_status),
             }
@@ -249,7 +270,8 @@ def run(args):
             print(
                 f"{name:30s} run {i + 1}: {seconds:6.2f}s rows={rec['rows']:5d} req={rec['requests']:3d} "
                 f"body={rec['body_bytes'] / 1e6:6.2f}MB inflight<={rec['max_in_flight']} "
-                f"status={rec['statuses']}{' TAINTED' if rec['tainted'] else ''}"
+                f"status={rec['statuses']} partial={rec['partial_error_logs']} refetch={rec['refetches']}"
+                f"{' TAINTED' if rec['tainted'] else ''}"
                 + (f" warn={hh_warnings[0][:120]!r}" if hh_warnings else "")
                 + (f" error={error[:160]!r}" if error else ""),
                 flush=True,

@@ -68,7 +68,8 @@ class HttpClient:
         max_in_flight: int = DEFAULT_MAX_IN_FLIGHT,
         reuse_connections: bool | None = None,
     ):
-        self.proxy = proxy
+        #: "host:port" / "user:pass@host:port" without a scheme mean an HTTP proxy (as with requests)
+        self.proxy = proxy if not proxy or "://" in proxy else f"http://{proxy}"
         #: default: pool without a proxy; with one, a new connection (tunnel) per request,
         #: as before 0.9.1, so rotating proxies still give each request its own exit IP
         self.reuse_connections = proxy is None if reuse_connections is None else reuse_connections
@@ -133,7 +134,7 @@ class HttpClient:
             future = asyncio.run_coroutine_threadsafe(self._post(client, url, data, headers, fresh), loop)
             try:
                 return future.result()
-            except httpx.TransportError as exc:  #: connect / read / timeout / protocol / proxy errors
+            except httpx.RequestError as exc:  #: connect / read / timeout / protocol / proxy / decoding errors
                 raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
 
     # ---- shared back-off: when one request is told to slow down (429), every thread waits

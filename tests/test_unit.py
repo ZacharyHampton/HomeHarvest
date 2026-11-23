@@ -451,6 +451,28 @@ def test_http_client_with_proxy_opens_a_connection_per_request():
     assert HttpClient(proxy="http://user:pass@127.0.0.1:8080").reuse_connections is False
 
 
+def test_proxy_without_scheme_is_http():
+    assert HttpClient(proxy="127.0.0.1:8080").proxy == "http://127.0.0.1:8080"
+    assert HttpClient(proxy="user:pass@127.0.0.1:8080").proxy == "http://user:pass@127.0.0.1:8080"
+    assert HttpClient(proxy="socks5://127.0.0.1:1080").proxy == "socks5://127.0.0.1:1080"
+
+
+def test_http_errors_become_network_errors():
+    import httpx
+
+    client = HttpClient()
+
+    async def broken(self, http, url, data, headers, fresh):
+        raise httpx.DecodingError("bad gzip")
+
+    client._post = broken.__get__(client)
+    try:
+        with pytest.raises(NetworkError, match="DecodingError"):
+            client.post("https://x", data="{}")
+    finally:
+        client.close()
+
+
 def test_429_pauses_other_requests(monkeypatch):
     scraper = make_scraper()
     responses = [FakeResponse(429, headers={"Retry-After": "5"}), FakeResponse(200, {"data": {}})]

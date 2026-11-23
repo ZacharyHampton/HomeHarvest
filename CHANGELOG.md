@@ -29,12 +29,14 @@ Median wall time from 3 live runs each, 0.9.0 against 0.9.1 (`scripts/bench.py`,
 ### Reliability
 - Connection, timeout and proxy errors are retried twice. After that they raise `homeharvest.NetworkError`, and a 5xx that is still failing after retries raises `homeharvest.HTTPStatusError`. On a later page or a detail batch, both still give partial results with a `HomeHarvestWarning`.
 - A 429 now pauses every request of the search, not only the one that got it.
-- Homes whose extra details come back with a field error ("The user aborted a request.", which empties that field) are fetched once more.
+- Homes whose extra details come back with a field error ("The user aborted a request.", which empties that field) are fetched once more. 0.9.0 gets these errors too. In testing, `property_history` came back empty once for 6 of 199 rentals. It didn't happen again in 4 later rental runs, and we haven't confirmed the cause.
+- Network errors on decoding a response are now caught as well (as `NetworkError`), so partial results are kept.
 
 ### Behavior notes (check before upgrading)
 - `requests` is no longer installed with HomeHarvest. If your code catches `requests.RequestException` around `scrape_property`, catch `homeharvest.NetworkError` (an `OSError`) instead. `AuthenticationError` and `RateLimitError` are unchanged.
-- Proxies: the `proxy` parameter works as before (`http://user:pass@host:port`). With a proxy, each request still opens its own connection, so rotating proxies still give each request a new exit IP. SOCKS proxies need `pip install "httpx[socks]"` (before, `requests[socks]`).
+- Proxies: the `proxy` parameter works as before (`http://user:pass@host:port`). A proxy without a scheme (`host:port` or `user:pass@host:port`) is treated as `http://`. Before, `user:pass@host:port` without a scheme didn't work. With a proxy, each request still opens its own connection, so rotating proxies still give each request a new exit IP. SOCKS proxies need `pip install "httpx[socks]"` (before, `requests[socks]`).
 - `return_type="raw"` no longer has the removed fields listed above.
+- `AuthenticationError.response` and `RateLimitError.response` are now a small HomeHarvest response object (`status_code`, `headers`, `content`, `text`, `json()`), not a `requests.Response`.
 - Up to 4 requests are in flight per search, the same peak as 0.9.0's 4 parallel pages. Extra-data searches now reach that peak too, so they send their requests faster (the same number in less time). If you're rate limited, use `parallel=False`.
 
 ### Packaging
