@@ -12,11 +12,12 @@ from .utils import (
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
 from .exceptions import (
-    InvalidListingType, InvalidDate, AuthenticationError, RateLimitError, HomeHarvestWarning
+    InvalidListingType, InvalidDate, AuthenticationError, RateLimitError, HomeHarvestWarning,
+    NetworkError, HTTPStatusError,
 )
 from typing import Union, Optional, List
 
-__version__ = "0.9.0"  #: keep in sync with pyproject.toml
+__version__ = "0.9.1"  #: keep in sync with pyproject.toml
 
 
 def _to_date_string(value, name: str) -> str | None:

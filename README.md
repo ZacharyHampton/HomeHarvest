@@ -420,6 +420,7 @@ The following may be raised when using HomeHarvest:
 - `InvalidDate`: a date is not in ISO format (e.g. `2025-01-20` or `2025-01-20T14:30:00`), or the end is before the start.
 - `AuthenticationError`: the data source answered 403 Forbidden on the first request (you may be blocked; wait, or use a proxy).
 - `RateLimitError`: still rate limited (429) after retries.
+- `NetworkError`: a request could not be completed (connection, timeout or proxy error) after retries. `HTTPStatusError` (a kind of `NetworkError`) means the data source kept answering with a server error (5xx). Both are `OSError`s.
 
 `HomeHarvestWarning` (a `UserWarning`) is shown when results are incomplete, for example when a later page or some extra property details could not be fetched. You still get everything that was fetched. To turn warnings into errors:
 

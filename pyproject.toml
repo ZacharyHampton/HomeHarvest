@@ -1,6 +1,6 @@
 [project]
 name = "homeharvest"
-version = "0.9.0"
+version = "0.9.1"
 description = "Python library for US property data: for sale, sold, pending, rentals, open houses and listing agent contacts"
 authors = [
     { name = "Zachary Hampton", email = "zachary@bunsly.com" },
