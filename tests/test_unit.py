@@ -218,7 +218,7 @@ def test_extra_details_are_fetched_in_small_batches():
     scraper._graphql_post = fake_post
     details = scraper.get_bulk_prop_details([str(i) for i in range(45)])
 
-    assert calls == [20, 20, 5]
+    assert sorted(calls) == [5, 20, 20]
     assert len(details) == 45
 
 
@@ -299,7 +299,7 @@ def test_backoff_grows_and_is_capped():
 def test_403_mid_search_keeps_fetched_pages(parallel):
     scraper = make_scraper(listing_type=ListingType.FOR_SALE, parallel=parallel)
 
-    def fake_general_search(variables, search_type):
+    def fake_general_search(variables, search_type, finish=True):
         offset = variables["offset"]
         if offset >= 400:
             raise AuthenticationError("Received 403 Forbidden", response=None)
@@ -358,6 +358,66 @@ def test_network_error_mid_search_keeps_fetched_pages(parallel):
     with pytest.warns(HomeHarvestWarning, match="NetworkError"):
         homes = scraper.search()
     assert len(homes) == 400
+
+
+def _detail_fake(log, delay=0.02):
+    """Fake _graphql_post for detail batches that records how many run at once."""
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    def fake_post(query, variables, operation_name):
+        ids = [pid for pid, _ in re.findall(r"home_(\d+): home\(property_id: (\d+)\)", query)]
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+            log.append(("start", ids[0]))
+        time.sleep(delay)
+        with lock:
+            state["now"] -= 1
+            log.append(("end", ids[0]))
+        return {"data": {f"home_{pid}": {"property_id": pid, "taxHistory": [{"year": 2025, "tax": 1}]} for pid in ids}}
+
+    return fake_post, state
+
+
+def test_detail_batches_run_concurrently_but_bounded():
+    scraper = make_scraper(extra_property_data=True)
+    log = []
+    scraper._graphql_post, state = _detail_fake(log)
+    details = scraper.get_bulk_prop_details([str(i) for i in range(200)])
+
+    assert len(details) == 200
+    assert 1 < state["max"] <= RealtorScraper.DETAIL_WORKERS
+    assert log[:2] == [("start", "0"), ("end", "0")]  #: the first batch goes alone (a 403 costs 1 request)
+
+
+def test_detail_batches_are_sequential_when_parallel_is_off():
+    scraper = make_scraper(extra_property_data=True, parallel=False)
+    scraper._graphql_post, state = _detail_fake([], delay=0.001)
+    assert len(scraper.get_bulk_prop_details([str(i) for i in range(100)])) == 100
+    assert state["max"] == 1
+
+
+def test_first_page_details_overlap_later_pages():
+    scraper = make_scraper(listing_type=ListingType.FOR_SALE, extra_property_data=True, limit=400)
+    events = []
+    detail_post, _ = _detail_fake(events, delay=0.05)
+
+    def fake_post(query, variables, operation_name):
+        if operation_name == "GetHomeSearch":
+            offset = variables["offset"]
+            events.append(("page", offset))
+            results = [make_home(offset + i) for i in range(200)]
+            return {"data": {"homeSearch": {"total": 400, "count": 200, "results": results}}}
+        return detail_post(query, variables, operation_name)
+
+    scraper._graphql_post = fake_post
+    homes = scraper.search()
+
+    assert [h["property_id"] for h in homes] == [str(i) for i in range(400)]  #: API order kept
+    assert all(h.get("taxHistory") for h in homes)  #: every home got its details
+    #: page 2 was requested before page 1's last detail batch finished
+    assert events.index(("page", 200)) < events.index(("end", "180"))
 
 
 def test_http_client_caps_requests_in_flight():

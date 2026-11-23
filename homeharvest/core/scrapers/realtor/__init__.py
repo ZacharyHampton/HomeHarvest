@@ -11,9 +11,10 @@ import copy
 import json
 import logging
 import random
+import threading
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from json import JSONDecodeError
 from typing import Dict, Union
 
@@ -63,6 +64,7 @@ class RealtorScraper(Scraper):
     #: Politeness / resilience settings
     MAX_PAGE_WORKERS = 4  #: max concurrent page requests when parallel=True
     DETAIL_BATCH_SIZE = 20  #: properties per extra-details request (the API rejects large queries)
+    DETAIL_WORKERS = 4  #: max concurrent extra-details requests when parallel=True (HttpClient caps the total at 4)
     MAX_RETRIES = 5  #: retries for 429 / 5xx responses
     NETWORK_RETRIES = 2  #: retries for connection / timeout / protocol errors
     BACKOFF_BASE = 1.0  #: seconds; doubles every retry
@@ -299,9 +301,14 @@ class RealtorScraper(Scraper):
         except Exception:
             return []
 
-    def general_search(self, variables: dict, search_type: str) -> Dict[str, Union[int, Union[list[Property], list[dict]]]]:
+    def general_search(
+        self, variables: dict, search_type: str, finish: bool = True
+    ) -> Dict[str, Union[int, Union[list[Property], list[dict]]]]:
         """
-        Handles a location area & returns a list of properties
+        Handles a location area & returns a list of properties.
+
+        finish=False returns the raw results (no extra details, not processed); pass them
+        to _finish_page later.
         """
 
         date_param = ""
@@ -605,15 +612,16 @@ class RealtorScraper(Scraper):
         #: offset=200, limit=200 -> the page at offset 200 keeps all 200
         properties_list: list[dict] = properties_list[: self.offset + self.limit - offset]
 
-        if self.extra_property_data and not self._defer_extra_property_data:
-            self._merge_extra_details(properties_list)
-
-        properties = self._process_results(properties_list)
-
         return {
             "total": total_properties,
-            "properties": properties,
+            "properties": self._finish_page(properties_list) if finish else properties_list,
         }
+
+    def _finish_page(self, properties_list: list[dict]) -> list:
+        """Add extra details (if asked for) to one page of raw results and process it."""
+        if self.extra_property_data and not self._defer_extra_property_data:
+            self._merge_extra_details(properties_list)
+        return self._process_results(properties_list)
 
     #: set on the inner search of _search_pending_with_dates: fetch raw, enrich later
     _defer_extra_property_data = False
@@ -765,16 +773,21 @@ class RealtorScraper(Scraper):
 
         return merged[: self.limit]
 
-    def _fetch_remaining_pages(self, homes: list, search_variables: dict, search_type: str, total: int) -> list:
+    def _fetch_remaining_pages(
+        self, homes: list | Future, search_variables: dict, search_type: str, total: int
+    ) -> list:
         """Fetch pages after the first. If a page fails (403, 429, network), keep what was
-        already fetched, warn, and stop instead of losing the whole search."""
+        already fetched, warn, and stop instead of losing the whole search.
+
+        `homes` is the first page, or a Future of it while its extra details are still
+        being fetched (so they overlap with the later pages)."""
         offsets = list(range(
             self.offset + self.DEFAULT_PAGE_SIZE,
             min(total, self.offset + self.limit),
             self.DEFAULT_PAGE_SIZE,
         ))
         if not offsets:
-            return homes
+            return homes.result() if isinstance(homes, Future) else homes
 
         failures: list[tuple[int, Exception]] = []
 
@@ -800,6 +813,8 @@ class RealtorScraper(Scraper):
                         for other in futures:
                             other.cancel()
 
+            if isinstance(homes, Future):
+                homes = homes.result()
             for page_offset in sorted(pages):  #: preserve API sort order
                 homes.extend(pages[page_offset])
             skipped = len(offsets) - len(pages) - len(failures)
@@ -863,12 +878,22 @@ class RealtorScraper(Scraper):
         if self.foreclosure:
             search_variables["foreclosure"] = self.foreclosure
 
-        result = self.general_search(search_variables, search_type=search_type)
+        #: with extra details, fetch the first page's details while the later pages download
+        overlap = self.parallel and self.extra_property_data and not self._defer_extra_property_data
+
+        result = self.general_search(search_variables, search_type=search_type, finish=not overlap)
         total = result["total"]
         homes = result["properties"]
+        more_pages = self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit)
 
         # Fetch remaining pages (parallel or sequential), keeping partial results on errors
-        if self.offset + self.DEFAULT_PAGE_SIZE < min(total, self.offset + self.limit):
+        if overlap and more_pages:
+            with ThreadPoolExecutor(max_workers=1) as first_page_pool:
+                first_page = first_page_pool.submit(self._finish_page, homes)
+                homes = self._fetch_remaining_pages(first_page, search_variables, search_type, total)
+        elif overlap:
+            homes = self._finish_page(homes)
+        elif more_pages:
             homes = self._fetch_remaining_pages(homes, search_variables, search_type, total)
 
         # Apply client-side hour-based filtering if needed
@@ -1340,7 +1365,8 @@ class RealtorScraper(Scraper):
     def get_bulk_prop_details(self, property_ids: list[str]) -> dict:
         """
         Fetch extra property details (schools, tax history, buyer's agent, price history, ...)
-        in batches of DETAIL_BATCH_SIZE. Returns a map of property_id to its details.
+        in batches of DETAIL_BATCH_SIZE, up to DETAIL_WORKERS at a time when parallel=True
+        (one at a time otherwise). Returns a map of property_id to its details.
 
         Problems are reported with a HomeHarvestWarning instead of silently returning nothing.
         """
@@ -1348,29 +1374,52 @@ class RealtorScraper(Scraper):
             return {}
 
         property_ids = list(dict.fromkeys(property_ids))  #: dedupe, keep order
+        batches = [
+            property_ids[start:start + self.DETAIL_BATCH_SIZE]
+            for start in range(0, len(property_ids), self.DETAIL_BATCH_SIZE)
+        ]
+        blocked = threading.Event()
+
+        def fetch(batch: list[str]):
+            if blocked.is_set():
+                return "skipped", None
+            try:
+                return "ok", self._fetch_detail_batch(batch)
+            except (AuthenticationError, RateLimitError) as exc:
+                blocked.set()  #: blocked: stop asking for more details, keep the search results
+                return "blocked", exc
+            except RECOVERABLE_ERRORS as exc:
+                return "error", exc
+
+        #: the first batch goes alone, so a 403 / 429 costs one request, not a burst
+        outcomes = [fetch(batches[0])]
+        rest = batches[1:]
+        if rest and not blocked.is_set():
+            if self.parallel and len(rest) > 1:
+                with ThreadPoolExecutor(max_workers=min(self.DETAIL_WORKERS, len(rest))) as executor:
+                    outcomes.extend(executor.map(fetch, rest))
+            else:
+                for batch in rest:
+                    outcomes.append(fetch(batch))
+                    if blocked.is_set():
+                        break
+
         details: dict[str, dict] = {}
         error_messages: list[str] = []
         missing = 0
-
-        for start in range(0, len(property_ids), self.DETAIL_BATCH_SIZE):
-            batch = property_ids[start:start + self.DETAIL_BATCH_SIZE]
-            try:
-                data = self._fetch_detail_batch(batch)
-            except (AuthenticationError, RateLimitError) as exc:
-                #: blocked: stop asking for more details, keep the search results
-                missing += len(property_ids) - start
-                error_messages.append(f"{type(exc).__name__}: {exc}")
-                break
-            except RECOVERABLE_ERRORS as exc:
+        for index, batch in enumerate(batches):
+            status, value = outcomes[index] if index < len(outcomes) else ("skipped", None)
+            if status != "ok":
                 missing += len(batch)
-                error_messages.append(f"{type(exc).__name__}: {exc}")
+                if value is not None:
+                    error_messages.append(f"{type(value).__name__}: {value}")
                 continue
 
-            homes = data.get("data") or {}
-            for error in data.get("errors") or []:
+            homes = value.get("data") or {}
+            for error in value.get("errors") or []:
                 error_messages.append(error.get("message") or str(error))
 
-            found = {key[len("home_"):]: value for key, value in homes.items() if value}
+            found = {key[len("home_"):]: home for key, home in homes.items() if home}
             if not found:
                 missing += len(batch)
             details.update(found)
