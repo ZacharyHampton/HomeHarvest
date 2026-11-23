@@ -98,6 +98,45 @@ ordered_properties = [
 
 
 def process_result(result: Property) -> pd.DataFrame:
+    """One property as a one-row DataFrame with the ordered_properties columns."""
+    properties_df = pd.DataFrame([process_result_row(result)])
+    properties_df = properties_df.reindex(columns=ordered_properties)
+
+    return properties_df[ordered_properties]
+
+
+def properties_to_dataframe(results: list[Property]) -> pd.DataFrame:
+    """All properties as one DataFrame: the same values and dtypes as concatenating one
+    process_result() frame per property (what HomeHarvest did up to 0.9.0), much faster.
+
+    pandas picks a concatenated column's dtype from the dtype each one-row frame inferred
+    (e.g. ints with a None become object, floats with a None stay float64). That depends
+    only on the kinds of values, so each column is built from one small frame per value kind.
+    """
+    if not results:
+        return pd.DataFrame()
+
+    rows = [process_result_row(result) for result in results]
+    columns = {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=FutureWarning)
+        for column in ordered_properties:
+            groups: dict = {}
+            for index, row in enumerate(rows):
+                value = row.get(column)
+                kind = "nan" if isinstance(value, float) and value != value else type(value)
+                groups.setdefault(kind, []).append(index)
+            parts = [
+                pd.DataFrame({column: [rows[i].get(column) for i in indexes]}, index=indexes)
+                for indexes in groups.values()
+            ]
+            columns[column] = (pd.concat(parts) if len(parts) > 1 else parts[0]).sort_index()[column]
+
+    return pd.DataFrame(columns, columns=ordered_properties).reset_index(drop=True)
+
+
+def process_result_row(result: Property) -> dict:
+    """One property as a dict of output column -> value (before the DataFrame is built)."""
     prop_data = {prop: None for prop in ordered_properties}
     prop_data.update(result.model_dump())
 
@@ -206,10 +245,7 @@ def process_result(result: Property) -> pd.DataFrame:
         prop_data["stories"] = description.stories
         prop_data["text"] = description.text
 
-    properties_df = pd.DataFrame([prop_data])
-    properties_df = properties_df.reindex(columns=ordered_properties)
-
-    return properties_df[ordered_properties]
+    return {column: prop_data.get(column) for column in ordered_properties}
 
 
 def validate_input(listing_type: str | list[str] | None) -> None:

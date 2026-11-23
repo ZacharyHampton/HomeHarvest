@@ -171,9 +171,18 @@ def fill_report(df) -> dict:
     return {col: round(100.0 * sum(_is_filled(v) for v in df[col]) / rows, 2) for col in df.columns}
 
 
+#: columns that join an unordered set into a string (order differs between processes)
+UNORDERED_COLUMNS = {"nearby_schools"}
+
+
 def signatures(df) -> dict:
+    def sig(col, value):
+        if col in UNORDERED_COLUMNS and isinstance(value, str):
+            value = ", ".join(sorted(value.split(", ")))
+        return _signature(value)
+
     return {
-        str(row["property_id"]): {col: _signature(row[col]) for col in df.columns}
+        str(row["property_id"]): {col: sig(col, row[col]) for col in df.columns}
         for _, row in df.iterrows()
     }
 

@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 from .core.scrapers import ScraperInput
 from .utils import (
-    process_result, ordered_properties, validate_input, validate_dates, validate_limit,
+    process_result, properties_to_dataframe, ordered_properties, validate_input, validate_dates, validate_limit,
     validate_offset, validate_datetime, validate_filters, validate_sort, validate_last_update_filters,
     convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days, detect_precision_and_convert
 )
@@ -249,13 +249,11 @@ def scrape_property(
     if scraper_input.return_type != ReturnType.pandas:
         return results
 
-    properties_dfs = [df for result in results if not (df := process_result(result)).empty]
-    if not properties_dfs:
-        return pd.DataFrame()
+    properties_df = properties_to_dataframe(results)
+    if properties_df.empty:
+        return properties_df
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FutureWarning)
 
-        return pd.concat(properties_dfs, ignore_index=True, axis=0)[ordered_properties].replace(
-            {"None": pd.NA, None: pd.NA, "": pd.NA}
-        )
+        return properties_df.replace({"None": pd.NA, None: pd.NA, "": pd.NA})

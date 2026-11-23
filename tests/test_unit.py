@@ -547,3 +547,25 @@ def test_buyer_agent_median_rent_and_insurance():
     assert row["buyer_agent_email"] == "pat@example.com"
     assert row["buyer_broker_name"] == "Buyer Broker"
     assert row["zip_median_rent"] == 1210
+
+
+def test_one_dataframe_matches_concatenating_one_frame_per_home():
+    """properties_to_dataframe must give the same values and dtypes as the 0.9.0 per-row concat."""
+    import pandas as pd
+    from homeharvest.utils import properties_to_dataframe, ordered_properties
+
+    homes = [
+        make_home(1, "sold", last_sold_date="2026-11-10", list_date="2026-07-23T00:00:00Z", hoa={"fee": 120}),
+        make_home(2, "for_sale", description={"beds": None, "baths_full": 1, "sqft": 900, "type": "condos"}),
+        make_home(3, "for_sale", last_price_change_amount=-1000.0, list_price=None),
+        make_home(4, "for_rent", open_houses=[{"start_date": "2026-11-28T15:00:00Z", "end_date": "2026-11-28T17:00:00Z"}]),
+    ]
+    props = [_process(home, extra=False) for home in homes]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        old = pd.concat([process_result(p) for p in props], ignore_index=True)[ordered_properties]
+    new = properties_to_dataframe(props)
+
+    pd.testing.assert_frame_equal(new, old)
+    assert properties_to_dataframe([]).empty
