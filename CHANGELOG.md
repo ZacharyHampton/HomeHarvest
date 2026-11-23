@@ -13,6 +13,7 @@
 
 ### Features
 - **Open house filter:** `open_house=True` returns only listings with an upcoming open house. `open_house_from` / `open_house_to` (date, datetime, or `"YYYY-MM-DD"`) limit it to a date window. Both use the server-side filter.
+- **Open house times in the default output:** new columns `next_open_house_start`, `next_open_house_end` and `open_houses` (every scheduled time, e.g. `2026-11-28 15:00-17:00 MST`). Before, open house times were only in `pydantic` / `raw` output.
 - **Buyer's agent on sold homes** (#134): `buyer_agent_name`, `buyer_agent_email`, `buyer_agent_phones`, `buyer_agent_id`, `buyer_agent_mls_set`, `buyer_agent_nrds_id`, `buyer_office_name`, `buyer_broker_name` (Pydantic: `advertisers.buyer_agent`, `advertisers.buyer_office`, `advertisers.buyer_broker`). Needs `extra_property_data`.
 - **Median rent** (#137): `neighborhood_median_rent` and `zip_median_rent`. Needs `extra_property_data`.
 - **Insurance and tax rates** (#121): `insurance_rate` and `property_tax_rate` (yearly, as a share of price) and `monthly_home_insurance` (dollars). Usually only on for-sale homes. Needs `extra_property_data`.
@@ -22,7 +23,7 @@
 - New exports: `RateLimitError`, `HomeHarvestWarning`, `homeharvest.__version__`.
 
 ### Behavior changes (check before upgrading)
-- `extra_property_data=True` (the default) is honored again, so a search adds about one request per 20 homes. Pass `extra_property_data=False` for large, fast pulls.
+- **`extra_property_data` now defaults to `False`.** Schools, tax history, assessed value, property history, buyer's agent, median rent and insurance/tax rates need `extra_property_data=True`, which adds about one request per 20 homes (200 sold homes: ~2s without, ~12s with). In 0.8.18 it was forced off; in 0.8.10 and earlier it defaulted on.
 - `listing_type=None` together with a date filter now covers `for_sale`, `for_rent`, `sold` and `pending`. `off_market` is left out because it has no date to filter on. Without a date filter, `None` works as before.
 - When several listing types are searched one by one, `limit` caps the merged result.
 - `parallel=True` now fetches at most 4 pages at a time (before, it used the thread pool default of up to 32).
