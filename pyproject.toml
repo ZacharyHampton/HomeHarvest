@@ -1,23 +1,71 @@
-[tool.poetry]
+[project]
 name = "homeharvest"
-version = "0.8.18"
-description = "Real estate scraping library"
-authors = ["Zachary Hampton <zachary@bunsly.com>", "Cullen Watson <cullen@bunsly.com>"]
-homepage = "https://github.com/ZacharyHampton/HomeHarvest"
+version = "0.9.0"
+description = "Python library for US property data: for sale, sold, pending, rentals, open houses and listing agent contacts"
+authors = [
+    { name = "Zachary Hampton", email = "zachary@bunsly.com" },
+    { name = "Cullen Watson", email = "cullen@bunsly.com" },
+]
 readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+keywords = [
+    "property data",
+    "real estate",
+    "sold comps",
+    "open houses",
+    "mls",
+    "real estate api",
+    "python",
+    "rentals",
+    "real estate agents",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "requests>=2.32.4,<3.0.0",
+    "pandas>=2.3.1,<3.0.0",
+    "pydantic>=2.11.7,<3.0.0",
+    "tenacity>=9.1.2,<10.0.0",
+    # pydantic needs this to read `X | None` annotations on Python 3.9
+    "eval-type-backport>=0.2.0; python_version < '3.10'",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.9"
-requests = "^2.32.4"
-pandas = "^2.3.1"
-pydantic = "^2.11.7"
-tenacity = "^9.1.2"
+[project.urls]
+Homepage = "https://tryhomeharvest.com"
+Source = "https://github.com/ZacharyHampton/HomeHarvest"
+Issues = "https://github.com/ZacharyHampton/HomeHarvest/issues"
+Docs = "https://tryhomeharvest.com"
+Changelog = "https://github.com/ZacharyHampton/HomeHarvest/blob/master/CHANGELOG.md"
 
+[tool.poetry]
+packages = [{ include = "homeharvest" }]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
-pre-commit = "^3.7.0"
+pytz = ">=2024.1"
+pre-commit = "^3.5.0"
+
+[tool.pytest.ini_options]
+markers = [
+    "live: hits the live property data API (slow, needs network)",
+]
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.1.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
