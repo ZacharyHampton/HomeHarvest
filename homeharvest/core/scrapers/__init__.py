@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import Union
 
-import requests
 import uuid
 from ...exceptions import AuthenticationError
 from .models import Property, ListingType, SiteName, SearchPropertyType, ReturnType
+from .http import HttpClient
 import json
 from pydantic import BaseModel
 
@@ -92,7 +92,8 @@ class Scraper:
         self.listing_type = scraper_input.listing_type
         self.property_type = scraper_input.property_type
         self.proxy = scraper_input.proxy
-        self.proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        #: one pooled client per search, shared by copies of this scraper and their threads
+        self.http = HttpClient(proxy=self.proxy)
 
         self.listing_type = scraper_input.listing_type
         self.radius = scraper_input.radius
@@ -153,10 +154,10 @@ class Scraper:
     def get_access_token():
         device_id = str(uuid.uuid4()).upper()
 
-        response = requests.post(
+        client = HttpClient()
+        response = client.post(
             "https://graph.realtor.com/auth/token",
             headers={
-                "Host": "graph.realtor.com",
                 "Accept": "*/*",
                 "Content-Type": "Application/json",
                 "X-Client-ID": "rdc_mobile_native,iphone",
@@ -173,6 +174,7 @@ class Scraper:
                 }
             ),
         )
+        client.close()
 
         data = response.json()
 

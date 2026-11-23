@@ -13,7 +13,6 @@ import logging
 import random
 import time
 import warnings
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import JSONDecodeError
 from typing import Dict, Union
@@ -27,7 +26,8 @@ from tenacity import (
 )
 
 from .. import Scraper, DEFAULT_HEADERS
-from ....exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning
+from ..http import HttpResponse
+from ....exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning, NetworkError
 from ..models import (
     Property,
     ListingType,
@@ -43,7 +43,7 @@ from .processors import (
 logger = logging.getLogger("homeharvest")
 
 #: Errors that mean "this request failed, but results fetched so far are still good".
-RECOVERABLE_ERRORS = (AuthenticationError, RateLimitError, requests.RequestException, JSONDecodeError)
+RECOVERABLE_ERRORS = (AuthenticationError, RateLimitError, NetworkError, JSONDecodeError)
 
 #: Listing types searched when listing_type=None and a date filter is used.
 #: OFF_MARKET has no list/sold date to filter on, so it is left out in that case.
@@ -64,6 +64,7 @@ class RealtorScraper(Scraper):
     MAX_PAGE_WORKERS = 4  #: max concurrent page requests when parallel=True
     DETAIL_BATCH_SIZE = 20  #: properties per extra-details request (the API rejects large queries)
     MAX_RETRIES = 5  #: retries for 429 / 5xx responses
+    NETWORK_RETRIES = 2  #: retries for connection / timeout / protocol errors
     BACKOFF_BASE = 1.0  #: seconds; doubles every retry
     BACKOFF_CAP = 30.0  #: max seconds to wait between retries
     RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -84,7 +85,7 @@ class RealtorScraper(Scraper):
     def _sleep(seconds: float) -> None:
         time.sleep(seconds)
 
-    def _backoff_seconds(self, attempt: int, response: requests.Response | None = None) -> float:
+    def _backoff_seconds(self, attempt: int, response: HttpResponse | None = None) -> float:
         """Exponential backoff with full jitter, honoring Retry-After when the server sends it."""
         if response is not None:
             retry_after = response.headers.get("Retry-After") if response.headers else None
@@ -119,19 +120,31 @@ class RealtorScraper(Scraper):
         }
         body = json.dumps(payload, separators=(',', ':'))
 
-        #: with a rotating proxy a 403 can clear up on the next request, so retry it a little
+        #: with a rotating proxy a 403 can clear up on the next request, so retry it a little,
+        #: on a new connection (the pooled one would keep the same proxy exit IP)
         max_forbidden_retries = 2 if self.proxy else 0
         forbidden_retries = 0
+        network_retries = 0
         attempt = 0
 
+        #: another thread was told to slow down (429): wait with it instead of piling on
+        wait = self.http.pause_remaining()
+        if wait > 0:
+            self._sleep(wait)
+
         while True:
-            response = requests.post(
-                self.SEARCH_GQL_URL,
-                headers=DEFAULT_HEADERS,
-                data=body,
-                proxies=self.proxies,
-                timeout=60,
-            )
+            try:
+                response = self.http.post(
+                    self.SEARCH_GQL_URL, headers=DEFAULT_HEADERS, data=body, fresh_connection=forbidden_retries > 0
+                )
+            except NetworkError as exc:
+                if network_retries >= self.NETWORK_RETRIES:
+                    raise
+                delay = self._backoff_seconds(network_retries)
+                logger.info("%s on %s, retrying in %.1fs", exc, operation_name, delay)
+                self._sleep(delay)
+                network_retries += 1
+                continue
 
             if response.status_code in self.RETRY_STATUS_CODES:
                 if attempt >= self.MAX_RETRIES:
@@ -144,6 +157,8 @@ class RealtorScraper(Scraper):
                     response.raise_for_status()
                 delay = self._backoff_seconds(attempt, response)
                 logger.info("HTTP %s from %s, retrying in %.1fs", response.status_code, operation_name, delay)
+                if response.status_code == 429:
+                    self.http.pause(delay)
                 self._sleep(delay)
                 attempt += 1
                 continue
@@ -679,6 +694,12 @@ class RealtorScraper(Scraper):
         return None
 
     def search(self):
+        try:
+            return self._search()
+        finally:
+            self.http.close()  #: drop the pooled connection (it reopens if this scraper is reused)
+
+    def _search(self):
         location_info = self.handle_location()
         if not location_info:
             return []

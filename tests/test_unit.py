@@ -4,17 +4,20 @@ Offline tests: no network. These run in CI on every pull request.
 The live API tests are in test_realtor.py (marked `live`).
 """
 
+import asyncio
 import re
+import threading
+import time
 import warnings
 
 import pytest
-import requests
 
 from homeharvest.core.scrapers import ScraperInput
 from homeharvest.core.scrapers.models import ListingType, ReturnType
+from homeharvest.core.scrapers.http import HttpClient, HttpResponse
 from homeharvest.core.scrapers.realtor import RealtorScraper
 from homeharvest.core.scrapers.realtor.processors import process_property, process_extra_property_details, get_key
-from homeharvest.exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning
+from homeharvest.exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning, NetworkError, HTTPStatusError
 from homeharvest.utils import process_result
 
 
@@ -80,7 +83,7 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code} error")
+            raise HTTPStatusError(f"{self.status_code} error", response=self)
 
 
 # ---------------------------------------------------------------- #143 past_days with several listing types
@@ -270,7 +273,7 @@ def test_429_is_retried_with_backoff(monkeypatch):
     ]
     sleeps = []
     scraper._sleep = sleeps.append
-    monkeypatch.setattr(requests, "post", lambda *a, **k: responses.pop(0))
+    monkeypatch.setattr(scraper.http, "post", lambda *a, **k: responses.pop(0))
 
     assert scraper._graphql_post("query X { x }", {}, "X") == {"data": {"ok": True}}
     assert len(sleeps) == 2
@@ -279,7 +282,7 @@ def test_429_is_retried_with_backoff(monkeypatch):
 
 def test_429_gives_up_with_rate_limit_error(monkeypatch):
     scraper = make_scraper()
-    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(429))
+    monkeypatch.setattr(scraper.http, "post", lambda *a, **k: FakeResponse(429))
     with pytest.raises(RateLimitError):
         scraper._graphql_post("query X { x }", {}, "X")
 
@@ -312,6 +315,88 @@ def test_403_mid_search_keeps_fetched_pages(parallel):
 
 def test_page_fan_out_is_polite():
     assert RealtorScraper.MAX_PAGE_WORKERS <= 4
+    #: pages and detail batches together never have more than 4 requests in flight (same as 0.9.0)
+    assert HttpClient().max_in_flight <= 4
+
+
+def test_network_errors_are_retried_then_raised(monkeypatch):
+    scraper = make_scraper()
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise NetworkError("ReadError: connection reset")
+        return FakeResponse(200, {"data": {"ok": True}})
+
+    monkeypatch.setattr(scraper.http, "post", flaky)
+    assert scraper._graphql_post("query X { x }", {}, "X") == {"data": {"ok": True}}
+    assert len(calls) == 3
+
+    def down(*a, **k):
+        calls.append(1)
+        raise NetworkError("ConnectError: down")
+
+    calls.clear()
+    monkeypatch.setattr(scraper.http, "post", down)
+    with pytest.raises(NetworkError):
+        scraper._graphql_post("query X { x }", {}, "X")
+    assert len(calls) == 1 + RealtorScraper.NETWORK_RETRIES
+
+
+@pytest.mark.parametrize("parallel", [True, False])
+def test_network_error_mid_search_keeps_fetched_pages(parallel):
+    scraper = make_scraper(listing_type=ListingType.FOR_SALE, parallel=parallel)
+
+    def fake_general_search(variables, search_type, finish=True):
+        offset = variables["offset"]
+        if offset >= 400:
+            raise NetworkError("ReadTimeout")
+        return {"total": 1000, "properties": [make_home(offset + i) for i in range(200)]}
+
+    scraper.general_search = fake_general_search
+    with pytest.warns(HomeHarvestWarning, match="NetworkError"):
+        homes = scraper.search()
+    assert len(homes) == 400
+
+
+def test_http_client_caps_requests_in_flight():
+    client = HttpClient(max_in_flight=3)
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    async def fake_post(self, http, url, data, headers, fresh):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        await asyncio.sleep(0.02)
+        with lock:
+            state["now"] -= 1
+        return HttpResponse(200, {}, b'{"ok": true}')
+
+    client._post = fake_post.__get__(client)
+    try:
+        threads = [threading.Thread(target=client.post, args=("https://x",), kwargs={"data": "{}"}) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        client.close()
+    assert state["max"] == 3
+
+
+def test_http_client_with_proxy_opens_a_connection_per_request():
+    assert HttpClient().reuse_connections is True
+    assert HttpClient(proxy="http://user:pass@127.0.0.1:8080").reuse_connections is False
+
+
+def test_429_pauses_other_requests(monkeypatch):
+    scraper = make_scraper()
+    responses = [FakeResponse(429, headers={"Retry-After": "5"}), FakeResponse(200, {"data": {}})]
+    monkeypatch.setattr(scraper.http, "post", lambda *a, **k: responses.pop(0))
+    scraper._graphql_post("query X { x }", {}, "X")
+    assert scraper.http.pause_remaining() > 4  #: other threads wait before sending
 
 
 # ---------------------------------------------------------------- open houses
