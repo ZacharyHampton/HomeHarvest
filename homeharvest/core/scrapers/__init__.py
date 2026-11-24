@@ -5,6 +5,7 @@ import uuid
 from ...exceptions import AuthenticationError
 from .models import Property, ListingType, SiteName, SearchPropertyType, ReturnType
 from .http import HttpClient
+from .runtime import IN_PYODIDE
 import json
 from pydantic import BaseModel
 
@@ -135,8 +136,9 @@ class Scraper:
         self.sort_by = scraper_input.sort_by
         self.sort_direction = scraper_input.sort_direction
 
-        # Pagination control
-        self.parallel = scraper_input.parallel
+        # Pagination control. Under Pyodide nothing runs in parallel (no threads), so use the
+        # sequential paths: they stop at the first failed page instead of sending the rest.
+        self.parallel = scraper_input.parallel and not IN_PYODIDE
 
         # Open house filtering
         self.open_house = scraper_input.open_house

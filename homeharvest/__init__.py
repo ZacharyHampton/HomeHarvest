@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import warnings
-import pandas as pd
+from typing import TYPE_CHECKING
 from datetime import datetime, timedelta, date
 from .core.scrapers import ScraperInput
 from .utils import (
     process_result, properties_to_dataframe, ordered_properties, validate_input, validate_dates, validate_limit,
     validate_offset, validate_datetime, validate_filters, validate_sort, validate_last_update_filters,
-    convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days, detect_precision_and_convert
+    convert_to_datetime_string, extract_timedelta_hours, extract_timedelta_days, detect_precision_and_convert,
+    _pandas,
 )
 from .core.scrapers.realtor import RealtorScraper
 from .core.scrapers.models import ListingType, SearchPropertyType, ReturnType, Property
@@ -17,7 +18,10 @@ from .exceptions import (
 )
 from typing import Union, Optional, List
 
-__version__ = "2.0.1"  #: keep in sync with pyproject.toml
+if TYPE_CHECKING:
+    import pandas as pd
+
+__version__ = "2.1.0.dev0"  #: keep in sync with pyproject.toml
 
 
 def _to_date_string(value, name: str) -> str | None:
@@ -149,6 +153,8 @@ def scrape_property(
         price_min, price_max, lot_sqft_min, lot_sqft_max, year_built_min, year_built_max
     )
     validate_sort(sort_by, sort_direction)
+    if return_type.lower() == ReturnType.pandas.value:
+        _pandas()  #: fail before searching if pandas isn't installed (it's optional under Pyodide)
 
     # Validate new last_update_date filtering parameters
     validate_last_update_filters(
@@ -253,6 +259,8 @@ def scrape_property(
     properties_df = properties_to_dataframe(results)
     if properties_df.empty:
         return properties_df
+
+    import pandas as pd  #: already imported by properties_to_dataframe
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FutureWarning)

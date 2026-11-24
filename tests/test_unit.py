@@ -5,6 +5,7 @@ The live API tests are in test_realtor.py (marked `live`).
 """
 
 import asyncio
+import json
 import re
 import threading
 import time
@@ -621,3 +622,111 @@ def test_homes_with_field_errors_are_fetched_again_once():
     assert calls == [["1", "2", "3"], ["2", "3"]]  #: one retry, only for the homes with errors
     assert details["2"]["property_history"] == [{"event_name": "Sold"}]
     assert details["3"]["property_history"] is None  #: still bad: the first copy is kept
+
+
+# ---------------------------------------------------------------- Pyodide / Cloudflare Python Workers (fetch, no threads)
+
+
+def test_headers_are_case_insensitive():
+    from homeharvest.core.scrapers.http import Headers
+
+    headers = Headers({"retry-after": "3", "Content-Type": "application/json"})
+    assert headers.get("Retry-After") == "3"
+    assert headers["CONTENT-TYPE"] == "application/json"
+    assert "Content-Type" in headers and headers.get("missing") is None
+
+
+def test_inline_executor_runs_in_order_without_threads():
+    from concurrent.futures import as_completed
+    from homeharvest.core.scrapers.runtime import InlineExecutor
+
+    calls = []
+    with InlineExecutor() as executor:
+        futures = [executor.submit(calls.append, n) for n in range(3)]
+        failed = executor.submit(lambda: 1 / 0)
+        assert list(executor.map(lambda n: n * 2, [1, 2])) == [2, 4]
+    assert calls == [0, 1, 2]
+    assert len(list(as_completed(futures))) == 3
+    with pytest.raises(ZeroDivisionError):
+        failed.result()
+
+
+def test_fetch_transport_skips_the_http_thread():
+    from homeharvest.core.scrapers.http import FetchTransport
+
+    sent = []
+
+    async def fake_fetch(url, *, method, headers, body, timeout):
+        sent.append((url, method, body, timeout))
+        return HttpResponse(200, {}, b'{"ok": true}', url=url)
+
+    client = HttpClient(timeout=7, transport=FetchTransport(timeout=7, fetch=fake_fetch, run_sync=asyncio.run))
+    assert client.post("https://x", data="{}").json() == {"ok": True}
+    assert client._thread is None and client._client is None
+    assert sent == [("https://x", "POST", "{}", 7)]
+    client.close()
+
+
+@pytest.fixture
+def pyodide(monkeypatch):
+    """Pretend to be Pyodide: no threads, no httpx2, fetch + run_sync (JSPI) for HTTP."""
+    import sys
+    import types
+
+    import homeharvest.core.scrapers as scrapers
+    from homeharvest.core.scrapers import http, runtime
+
+    for module in (runtime, http, scrapers):
+        monkeypatch.setattr(module, "IN_PYODIDE", True)
+
+    ffi = types.ModuleType("pyodide.ffi")
+    ffi.can_run_sync = lambda: True
+    ffi.run_sync = asyncio.run
+    monkeypatch.setitem(sys.modules, "pyodide", types.ModuleType("pyodide"))
+    monkeypatch.setitem(sys.modules, "pyodide.ffi", ffi)
+
+    def no_threads(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", no_threads)
+
+    requests = []
+    replies = []
+
+    async def fake_fetch(url, *, method, headers, body, timeout):
+        requests.append(json.loads(body))
+        status, payload = replies.pop(0)
+        return HttpResponse(status, http.Headers({"retry-after": "0"}), json.dumps(payload).encode(), url=url)
+
+    monkeypatch.setattr(http, "js_fetch", fake_fetch)
+    return types.SimpleNamespace(requests=requests, replies=replies)
+
+
+def test_scrape_property_under_pyodide_uses_fetch_and_no_threads(pyodide):
+    from homeharvest import scrape_property
+
+    geo = {"text": "Austin, TX", "geo": {"area_type": "city", "city": "Austin", "state_code": "TX"}}
+    homes = [
+        make_home(n, open_houses=[{"start_date": "2026-11-28T11:00:00", "end_date": "2026-11-28T13:00:00"}])
+        for n in (1, 2)
+    ]
+    pyodide.replies.extend([
+        (429, {}),  #: retried after a (JS timer) sleep
+        (200, {"data": {"search_suggestions": {"geo_results": [geo]}}}),
+        (200, {"data": {"homeSearch": {"total": 2, "count": 2, "results": homes}}}),
+    ])
+
+    results = scrape_property(
+        "Austin, TX", listing_type="for_sale", open_house_from="2026-11-28", open_house_to="2026-11-29",
+        return_type="pydantic", extra_property_data=False,
+    )
+
+    assert [home.property_id for home in results] == ["1", "2"]
+    assert results[0].open_houses
+    assert [r["operationName"] for r in pyodide.requests] == ["Search_suggestions", "Search_suggestions", "GetHomeSearch"]
+    assert 'open_house: { min: "2026-11-28", max: "2026-11-29" }' in pyodide.requests[-1]["query"]
+
+
+def test_proxies_are_refused_under_pyodide(pyodide):
+    with pytest.raises(ValueError, match="Pyodide"):
+        HttpClient(proxy="http://127.0.0.1:8080")

@@ -1,9 +1,23 @@
 from __future__ import annotations
-import pandas as pd
 import warnings
+from typing import TYPE_CHECKING
 from datetime import datetime
 from .core.scrapers.models import Property, ListingType, Advertisers
 from .exceptions import InvalidListingType, InvalidDate
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+
+def _pandas():
+    """pandas, imported on first use: only return_type="pandas" needs it (it's optional under Pyodide)."""
+    try:
+        import pandas
+    except ImportError as exc:  # pragma: no cover - pandas is a dependency on CPython
+        raise ImportError(
+            'return_type="pandas" needs pandas: pip install pandas, or use return_type="pydantic" or "raw".'
+        ) from exc
+    return pandas
 
 ordered_properties = [
     "property_url",
@@ -99,6 +113,7 @@ ordered_properties = [
 
 def process_result(result: Property) -> pd.DataFrame:
     """One property as a one-row DataFrame with the ordered_properties columns."""
+    pd = _pandas()
     properties_df = pd.DataFrame([process_result_row(result)])
     properties_df = properties_df.reindex(columns=ordered_properties)
 
@@ -113,6 +128,7 @@ def properties_to_dataframe(results: list[Property]) -> pd.DataFrame:
     (e.g. ints with a None become object, floats with a None stay float64). That depends
     only on the kinds of values, so each column is built from one small frame per value kind.
     """
+    pd = _pandas()
     if not results:
         return pd.DataFrame()
 

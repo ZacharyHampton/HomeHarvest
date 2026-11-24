@@ -12,9 +12,8 @@ import json
 import logging
 import random
 import threading
-import time
 import warnings
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, as_completed
 from json import JSONDecodeError
 from typing import Dict, Union
 
@@ -28,6 +27,7 @@ from tenacity import (
 
 from .. import Scraper, DEFAULT_HEADERS
 from ..http import HttpResponse
+from .. import runtime
 from ....exceptions import AuthenticationError, RateLimitError, HomeHarvestWarning, NetworkError
 from ..models import (
     Property,
@@ -85,7 +85,7 @@ class RealtorScraper(Scraper):
 
     @staticmethod
     def _sleep(seconds: float) -> None:
-        time.sleep(seconds)
+        runtime.sleep(seconds)  #: time.sleep, or a JS timer under Pyodide
 
     def _backoff_seconds(self, attempt: int, response: HttpResponse | None = None) -> float:
         """Exponential backoff with full jitter, honoring Retry-After when the server sends it."""
@@ -183,6 +183,7 @@ class RealtorScraper(Scraper):
         wait=wait_exponential(multiplier=1, min=1, max=4),
         stop=stop_after_attempt(3),
         reraise=True,
+        sleep=lambda seconds: runtime.sleep(seconds),  #: looked up per call, so tests can patch runtime.sleep
     )
     def handle_location(self):
         variables = {
@@ -649,7 +650,7 @@ class RealtorScraper(Scraper):
         if self.return_type == ReturnType.raw or self._defer_extra_property_data:
             return properties_list
 
-        with ThreadPoolExecutor(max_workers=self.NUM_PROPERTY_WORKERS) as executor:
+        with runtime.new_executor(self.NUM_PROPERTY_WORKERS) as executor:
             futures = [
                 executor.submit(process_property, result, self.mls_only, self.extra_property_data,
                                 self.exclude_pending, self.listing_type, get_key, process_extra_property_details)
@@ -799,7 +800,7 @@ class RealtorScraper(Scraper):
 
         if self.parallel:
             pages: dict[int, list] = {}
-            with ThreadPoolExecutor(max_workers=self.MAX_PAGE_WORKERS) as executor:
+            with runtime.new_executor(self.MAX_PAGE_WORKERS) as executor:
                 futures = {executor.submit(fetch, page_offset): page_offset for page_offset in offsets}
                 for future in as_completed(futures):
                     page_offset = futures[future]
@@ -888,7 +889,7 @@ class RealtorScraper(Scraper):
 
         # Fetch remaining pages (parallel or sequential), keeping partial results on errors
         if overlap and more_pages:
-            with ThreadPoolExecutor(max_workers=1) as first_page_pool:
+            with runtime.new_executor(1) as first_page_pool:
                 first_page = first_page_pool.submit(self._finish_page, homes)
                 homes = self._fetch_remaining_pages(first_page, search_variables, search_type, total)
         elif overlap:
@@ -1422,7 +1423,7 @@ class RealtorScraper(Scraper):
         rest = batches[1:]
         if rest and not blocked.is_set():
             if self.parallel and len(rest) > 1:
-                with ThreadPoolExecutor(max_workers=min(self.DETAIL_WORKERS, len(rest))) as executor:
+                with runtime.new_executor(min(self.DETAIL_WORKERS, len(rest))) as executor:
                     outcomes.extend(executor.map(fetch, rest))
             else:
                 for batch in rest:

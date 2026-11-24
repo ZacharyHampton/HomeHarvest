@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (2.1.0)
+
+### Runs in Cloudflare Python Workers (Pyodide)
+- **`scrape_property` works under Pyodide** (`sys.platform == "emscripten"`), e.g. in a Cloudflare Python Worker. The API is the same and stays synchronous. Each request goes through the JavaScript `fetch` API, and HomeHarvest waits for it with `pyodide.ffi.run_sync` (JSPI). Call it from inside a request handler, not at import time.
+- **No threads there.** Pages, detail batches and parsing run one at a time on the calling thread (`parallel` is treated as `False`). Retries wait on a JS timer instead of spinning.
+- **Smaller install there.** `httpx2` and `pandas` are not installed under Pyodide. Use `return_type="pydantic"` or `"raw"`, or install pandas yourself for `"pandas"`. A missing pandas now fails before the search, with a clear message.
+- **Proxies are refused** under Pyodide (`ValueError`): fetch can't use one.
+
+### Everywhere else
+- Nothing changes on CPython: same dependencies, threads, HTTP/2 client and results. pandas is now imported when a search first needs it, not on `import homeharvest`.
+- `HttpClient(transport=FetchTransport(fetch=..., run_sync=...))` drives the fetch path with your own function (the offline tests use it).
+
 ## 2.0.1 (2026-11-23)
 
 README only: back to the original layout, so the PyPI page matches GitHub. No code changes.
