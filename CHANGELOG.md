@@ -1,20 +1,22 @@
 # Changelog
 
-## Unreleased (2.1.0)
+## 2.1.0 (2026-11-23)
 
-### Runs in Cloudflare Python Workers (Pyodide)
-- **`scrape_property` works under Pyodide** (`sys.platform == "emscripten"`), e.g. in a Cloudflare Python Worker. The API is the same and stays synchronous. Each request goes through the JavaScript `fetch` API, and HomeHarvest waits for it with `pyodide.ffi.run_sync` (JSPI). Call it from inside a request handler, not at import time.
+HomeHarvest now runs in Cloudflare Python Workers (Pyodide), with the same `scrape_property()` call. On CPython nothing else changes, except one fix that changes results: `open_house_to` now includes its last day.
+
+### Upgrading from 2.0 (behavior change)
+- **`open_house_to` now includes its last day.** The API reads the end of the window as midnight at the start of that day, so in 2.0 `open_house_from="2026-11-28", open_house_to="2026-11-29"` dropped every Sunday open house (Austin: 10 homes instead of 21). HomeHarvest now asks for the day after. If you passed the day after `open_house_to` to work around this, you now get one extra day: pass the last day you want.
+
+### Cloudflare Python Workers (Pyodide)
+- **The same call works in a Worker.** Under Pyodide (`sys.platform == "emscripten"`) each request goes through the JavaScript `fetch` API, and HomeHarvest waits for it with `pyodide.ffi.run_sync` (JSPI), so `scrape_property` stays synchronous. Call it inside a request handler, not at import time.
+- **How to use it.** Add `homeharvest` to `dependencies` in the Worker's `pyproject.toml`, set `compatibility_flags = ["python_workers"]` with a `compatibility_date` of 2026-09-08 or later (Python 3.14) in the wrangler config, and deploy with `uv run pywrangler deploy` (pywrangler needs uv 0.13.4 or newer). Use `return_type="pydantic"` or `"raw"`. The README has a minimal Worker. The free [open house list](https://homeharvestdata.com/free-tools/open-house-list) runs this way.
 - **No threads there.** Pages, detail batches and parsing run one at a time on the calling thread (`parallel` is treated as `False`). Retries wait on a JS timer instead of spinning.
-- **Smaller install there.** `httpx2` and `pandas` are not installed under Pyodide. Use `return_type="pydantic"` or `"raw"`, or install pandas yourself for `"pandas"`. A missing pandas now fails before the search, with a clear message.
-- **Proxies are refused** under Pyodide (`ValueError`): fetch can't use one.
-- README: a "Cloudflare Python Workers" section with a minimal Worker.
-
-### Fixed
-- **`open_house_to` now includes its last day.** The API treats the end of the window as midnight at the start of that day, so `open_house_from="2026-11-28", open_house_to="2026-11-29"` dropped every Sunday open house (Austin: 10 homes instead of 21). HomeHarvest now asks for the day after.
+- **Smaller install there.** `httpx2` and `pandas` are not installed under Pyodide (9 MB of packages instead of 39 MB). For `return_type="pandas"`, install pandas yourself. A missing pandas fails before the search, with a clear message.
+- **Proxies are refused** there (`ValueError`): fetch can't use one.
 
 ### Everywhere else
-- Nothing changes on CPython: same dependencies, threads, HTTP/2 client and results. pandas is now imported when a search first needs it, not on `import homeharvest`.
-- `HttpClient(transport=FetchTransport(fetch=..., run_sync=...))` drives the fetch path with your own function (the offline tests use it).
+- Nothing else changes on CPython: same dependencies, threads, HTTP/2 client and results. pandas is imported when a search first needs it, not on `import homeharvest`.
+- `HttpClient(transport=FetchTransport(fetch=..., run_sync=...))` drives the fetch path with your own function (the offline tests use it to run the Pyodide path on CPython).
 
 ## 2.0.1 (2026-11-23)
 

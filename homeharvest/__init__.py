@@ -21,7 +21,7 @@ from typing import Union, Optional, List
 if TYPE_CHECKING:
     import pandas as pd
 
-__version__ = "2.1.0.dev0"  #: keep in sync with pyproject.toml
+__version__ = "2.1.0"  #: keep in sync with pyproject.toml
 
 
 def _to_date_string(value, name: str) -> str | None:
