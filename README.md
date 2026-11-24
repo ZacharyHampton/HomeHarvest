@@ -15,6 +15,7 @@
 - **Flexible Filtering**: Filter by beds, baths, price, sqft, lot size, year built
 - **Time-Based Queries**: Search by hours, days, or specific date ranges
 - **Sorting**: Sort results by price, date, size, or last update
+- **Runs on Cloudflare Workers**: The same `scrape_property()` call works in a Cloudflare Python Worker (Pyodide), no server needed
 
 ![homeharvest](https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/b3d5d727-e67b-4a9f-85d8-1e65fd18620a)
 
@@ -134,6 +135,22 @@ properties = scrape_property(
 # Offset for chunks: rows 200-399
 properties = scrape_property(location="Los Angeles, CA", listing_type="for_sale", offset=200, limit=200)
 ```
+
+### Cloudflare Python Workers
+HomeHarvest runs in a [Cloudflare Python Worker](https://developers.cloudflare.com/workers/languages/python/) (Pyodide) with no code changes. Requests go through the Workers `fetch` API, and pages are fetched one at a time (there are no threads). Use `return_type="pydantic"` or `"raw"`: pandas and httpx2 are not installed there. The free [open house list](https://homeharvestdata.com/free-tools/open-house-list) runs this way.
+
+```py
+# src/entry.py (pyproject.toml: dependencies = ["homeharvest"]; wrangler: compatibility_flags = ["python_workers"])
+from workers import WorkerEntrypoint, Response
+from homeharvest import scrape_property
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        homes = scrape_property("Austin, TX", listing_type="for_sale", open_house=True, return_type="raw", limit=50)
+        return Response.from_json(homes)
+```
+
+Call it inside the request handler (it waits on fetch with JSPI), not at import time. Proxies aren't supported there.
 
 ## Output
 ```plaintext

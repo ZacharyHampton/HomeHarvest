@@ -7,6 +7,7 @@
 - **No threads there.** Pages, detail batches and parsing run one at a time on the calling thread (`parallel` is treated as `False`). Retries wait on a JS timer instead of spinning.
 - **Smaller install there.** `httpx2` and `pandas` are not installed under Pyodide. Use `return_type="pydantic"` or `"raw"`, or install pandas yourself for `"pandas"`. A missing pandas now fails before the search, with a clear message.
 - **Proxies are refused** under Pyodide (`ValueError`): fetch can't use one.
+- README: a "Cloudflare Python Workers" section with a minimal Worker.
 
 ### Fixed
 - **`open_house_to` now includes its last day.** The API treats the end of the window as midnight at the start of that day, so `open_house_from="2026-11-28", open_house_to="2026-11-29"` dropped every Sunday open house (Austin: 10 homes instead of 21). HomeHarvest now asks for the day after.
