@@ -1,123 +1,79 @@
 <img src="https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/d1a2bf8b-09f5-4c57-b33a-0ada8a34f12d" width="400">
 
-**HomeHarvest is a Python library for US property data: homes for sale, sold, pending, rentals, open houses, and listing agent contacts.**
+**HomeHarvest** is a real estate data library that extracts and formats US property data in the style of MLS listings.
 
-Give it a city, ZIP code, or address. Get back a clean table (pandas), typed models (Pydantic), or raw JSON.
+- 🤖 [HomeHarvest MCP](https://homeharvestdata.com/mcp) - Property data inside your AI agent.
+- 🏡 [Modern Realty](https://www.modernrealty.io/?utm_source=github&utm_medium=readme&utm_campaign=homeharvest) - Real estate agent? Modern Realty writes your lead texts.
 
-> **Real estate agent?** Modern Realty writes your lead texts → https://www.modernrealty.io/?utm_source=github&utm_medium=readme&utm_campaign=homeharvest
+## HomeHarvest Features
 
-> **MCP:** the HomeHarvest MCP server (property data inside your AI agent) is out → [homeharvestdata.com/mcp](https://homeharvestdata.com/mcp)
+- **Listing Types**: Homes for sale, sold, pending, for rent, or several at once
+- **Open Houses**: Upcoming open houses, or open houses in a date window
+- **Agent Contacts**: Listing agent and office (and the buyer's agent on sold homes), with phone and email
+- **Data Format**: Structures data to resemble MLS listings
+- **Export Options**: Save as CSV, Excel, or return as Pandas/Pydantic/Raw
+- **Flexible Filtering**: Filter by beds, baths, price, sqft, lot size, year built
+- **Time-Based Queries**: Search by hours, days, or specific date ranges
+- **Sorting**: Sort results by price, date, size, or last update
 
-## Install
+![homeharvest](https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/b3d5d727-e67b-4a9f-85d8-1e65fd18620a)
+
+## Installation
 
 ```bash
 pip install -U homeharvest
 ```
-_Python 3.11 or newer._
+  _Python version >= [3.11](https://www.python.org/downloads/) required. Upgrading from 0.9? See the [2.0.0 release notes](https://github.com/ZacharyHampton/HomeHarvest/releases/tag/v2.0.0)._
 
-## Quick start
+## Usage
+
+### Python
 
 ```py
 from homeharvest import scrape_property
 
-homes = scrape_property(location="San Diego, CA", listing_type="sold", past_days=30)
-print(len(homes), "homes sold in the last 30 days")
-print(homes[["formatted_address", "sold_price", "agent_name", "agent_phones"]].head())
-homes.to_csv("sold_last_30_days.csv", index=False)
-```
-
-## What you can get
-
-| You want | How |
-|---|---|
-| **Sold comps** | `listing_type="sold"`, `past_days=90`, or `location="<address>", radius=0.5` for comps around a home |
-| **Open houses** | `open_house=True` (upcoming), or `open_house_from` / `open_house_to` for a date window |
-| **Listing agent contacts** | `agent_name`, `agent_email`, `agent_phones`, `office_name`, `broker_name` (when the listing has them) |
-| **Buyer's agent (sold homes)** | `buyer_agent_name`, `buyer_agent_email`, `buyer_agent_phones`, `buyer_office_name` |
-| **Rentals** | `listing_type="for_rent"`, plus `neighborhood_median_rent` and `zip_median_rent` |
-| **Pending / contingent** | `listing_type="pending"` |
-| **Price history and tax** | `property_history`, `previous_list_price`, `original_list_price`, `tax`, `tax_history`, `assessed_value` |
-| **Costs** | `hoa_fee`, `insurance_rate`, `monthly_home_insurance`, `property_tax_rate`, `estimated_value` |
-
-Export to CSV / Excel, or use `return_type="pydantic"` / `"raw"`. Filter by beds, baths, price, sqft, lot size, year built, and date (hours, days, or a range). Sort by price, date, size, or last update.
-
-![homeharvest](https://github.com/ZacharyHampton/HomeHarvest/assets/78247585/b3d5d727-e67b-4a9f-85d8-1e65fd18620a)
-
-## New in 2.0.0
-
-HomeHarvest 2.0.0 is faster: searches with `extra_property_data=True` take about half the time, and pulls of 1,000 to 2,000 homes take 40 to 50% less time. It now needs **Python 3.11 or newer** and uses `httpx2` instead of `requests`. If you catch network errors, catch `homeharvest.NetworkError`. See the [changelog](CHANGELOG.md) for the upgrade notes.
-
-## New in 0.9.0
-
-### Date filters work with several listing types
-`past_days`, `past_hours` and `date_from` / `date_to` now work when `listing_type` is `None` or a list. Each type is filtered on its own date (sold date for sold, list date for for sale / for rent, pending date for pending) and the results are merged with no duplicates.
-
-```py
-# everything listed, sold, or gone pending in Warren, MI yesterday
-homes = scrape_property(location="Warren, MI", past_days=1)
-```
-With `listing_type=None` and a date filter, HomeHarvest searches for_sale, for_rent, sold and pending (off_market has no date to filter on).
-
-`listing_type="pending"` with `past_days` or dates works again too (0.8.x returned no homes).
-
-### Open houses
-```py
-# listings with an open house this weekend
-homes = scrape_property(
-    location="Austin, TX",
-    listing_type="for_sale",
-    open_house_from="2026-11-28",
-    open_house_to="2026-11-29",
+properties = scrape_property(
+    location="San Diego, CA",
+    listing_type="sold",  # for_sale, for_rent, pending
+    past_days=30
 )
-print(homes[["formatted_address", "list_price", "agent_name", "agent_phones"]])
-```
-Use `open_house=True` for any upcoming open house. Each row has `next_open_house_start`, `next_open_house_end` and `open_houses` (every scheduled time). With `return_type="pydantic"` or `"raw"`, `open_houses` is a list of events.
 
-### Buyer's agent, price history, median rent, insurance
-These come with `extra_property_data=True` (off by default). They cost one extra request per 20 homes, so leave it off for big, fast pulls.
-
-```py
-sold = scrape_property(location="Dallas, TX", listing_type="sold", past_days=30)
-print(sold[["formatted_address", "sold_price", "original_list_price", "buyer_agent_name", "buyer_office_name"]])
-
-rentals = scrape_property(location="Huntsville, AL", listing_type="for_rent")
-print(rentals[["formatted_address", "list_price", "neighborhood_median_rent", "zip_median_rent"]])
+properties.to_csv("results.csv", index=False)
+print(f"Found {len(properties)} properties")
 ```
 
-- `previous_list_price`, `last_price_change_amount`, `price_reduced_amount`: spot price cuts (no extra request needed).
-- `original_list_price`: the price the current listing started at.
-- `insurance_rate` / `property_tax_rate`: yearly estimate as a share of price (e.g. `0.0099` = 0.99%); `monthly_home_insurance` in dollars. Usually only on for-sale homes.
-
-### Fewer failed runs
-- HTTP 429 (rate limited) is retried with exponential backoff and jitter.
-- If one page fails mid-search (403 or 429), you get the pages already fetched plus a `HomeHarvestWarning`, instead of an exception that loses everything.
-- `parallel=True` fetches at most 4 pages at a time.
-
-## More examples
-
-### Locations
+### Flexible Location Formats
 ```py
 # Accepts: zip code, city, "city, state", full address, neighborhood, county, state
-homes = scrape_property(location="92104")
-comps = scrape_property(location="1234 Main St, San Diego, CA 92104", radius=0.5, listing_type="sold", past_days=180)
+properties = scrape_property(
+    location="San Diego, CA",  # or "92104", "San Diego", "1234 Main St, San Diego, CA 92104"
+    radius=5.0  # Optional: search within radius (miles) of an address
+)
 ```
 
-### Time-based filtering
+### Advanced Filtering Examples
+
+#### Time-Based Filtering
 ```py
 from datetime import datetime, timedelta
 
-homes = scrape_property(
+# Filter by hours or use datetime/timedelta objects
+properties = scrape_property(
     location="Austin, TX",
     listing_type="for_sale",
-    past_hours=24,  # or timedelta(hours=24)
-    # date_from=datetime.now() - timedelta(days=7),  # alternative: datetime objects
-    # date_to=datetime.now(),                         # hour precision is detected automatically
+    past_hours=24,  # or timedelta(hours=24) for Pythonic approach
+    # date_from=datetime.now() - timedelta(days=7),  # Alternative: datetime objects
+    # date_to=datetime.now(),  # Automatic hour precision detection
 )
+
+# Date filters also work across several listing types (each on its own date)
+properties = scrape_property(location="Warren, MI", past_days=1)  # listed, sold, or pending yesterday
 ```
 
-### Property filters
+#### Property Filters
 ```py
-homes = scrape_property(
+# Combine any filters: beds, baths, sqft, price, lot_sqft, year_built
+properties = scrape_property(
     location="San Francisco, CA",
     listing_type="for_sale",
     beds_min=3, beds_max=5,
@@ -125,50 +81,63 @@ homes = scrape_property(
     sqft_min=1500, sqft_max=3000,
     price_min=300000, price_max=800000,
     year_built_min=2000,
-    lot_sqft_min=5000,
+    lot_sqft_min=5000
 )
 ```
 
-### Sorting and listing types
+#### Open Houses
+```py
+# Listings with an open house this weekend (or open_house=True for any upcoming one)
+properties = scrape_property(
+    location="Austin, TX",
+    listing_type="for_sale",
+    open_house_from="2026-11-28",
+    open_house_to="2026-11-29"
+)
+print(properties[["formatted_address", "next_open_house_start", "agent_name", "agent_phones"]])
+```
+
+#### Sorting & Listing Types
 ```py
 # Sort options: list_price, list_date, sqft, beds, baths, last_update_date
-# Listing types: "for_sale", "for_rent", "sold", "pending", "off_market", a list, or None
-homes = scrape_property(
+# Listing types: "for_sale", "for_rent", "sold", "pending", "off_market", list, or None (common types)
+properties = scrape_property(
     location="Miami, FL",
-    listing_type=["for_sale", "pending"],
-    sort_by="list_price",
-    sort_direction="asc",
-    limit=100,
+    listing_type=["for_sale", "pending"],  # Single string, list, or None
+    sort_by="list_price",  # Sort field
+    sort_direction="asc",  # "asc" or "desc"
+    limit=100
 )
 ```
 
-### Pagination
+#### Extra Property Data
 ```py
-# Sequential mode stops early once time filters stop matching (and is gentler on rate limits)
-homes = scrape_property(
+# Price history, tax history, schools, buyer's agent, median rent, insurance (one extra request per 20 homes)
+properties = scrape_property(
+    location="Dallas, TX",
+    listing_type="sold",
+    past_days=30,
+    extra_property_data=True
+)
+```
+
+#### Pagination Control
+```py
+# Sequential mode with early termination (more efficient for narrow filters)
+properties = scrape_property(
     location="Los Angeles, CA",
     listing_type="for_sale",
-    updated_in_past_hours=2,
-    parallel=False,
+    updated_in_past_hours=2,  # Narrow time window
+    parallel=False  # Fetch pages sequentially, stop when filters no longer match
 )
 
-# Chunks: rows 200-399
-page_2 = scrape_property(location="Los Angeles, CA", listing_type="for_sale", offset=200, limit=200)
-```
-
-### Pydantic models
-```py
-homes = scrape_property(location="San Diego, CA", listing_type="for_sale", return_type="pydantic")
-
-for home in homes[:5]:
-    print(home.address.formatted_address, home.list_price)
-    if home.advertisers and home.advertisers.agent:
-        print("  agent:", home.advertisers.agent.name, home.advertisers.agent.email)
+# Offset for chunks: rows 200-399
+properties = scrape_property(location="Los Angeles, CA", listing_type="for_sale", offset=200, limit=200)
 ```
 
 ## Output
 ```plaintext
->>> homes.head()
+>>> properties.head()
     MLS       MLS # Status          Style  ...     COEDate LotSFApx PrcSqft Stories
 0  SDCA   230018348   SOLD         CONDOS  ...  2023-10-03   290110     803       2
 1  SDCA   230016614   SOLD      TOWNHOMES  ...  2023-10-03     None     838       3
@@ -176,6 +145,25 @@ for home in homes[:5]:
 3  MRCA  NDP2306335   SOLD  SINGLE_FAMILY  ...  2023-10-03     7519     661       2
 4  SDCA   230014532   SOLD         CONDOS  ...  2023-10-03     None     752       1
 [5 rows x 22 columns]
+```
+
+### Using Pydantic Models
+```py
+from homeharvest import scrape_property
+
+# Get properties as Pydantic models for type safety and data validation
+properties = scrape_property(
+    location="San Diego, CA",
+    listing_type="for_sale",
+    return_type="pydantic"  # Returns list of Property models
+)
+
+# Access model fields with full type hints and validation
+for prop in properties[:5]:
+    print(f"Address: {prop.address.formatted_address}")
+    print(f"Price: ${prop.list_price:,}")
+    if prop.description:
+        print(f"Beds: {prop.description.beds}, Baths: {prop.description.baths_full}")
 ```
 
 ### Parameters for `scrape_property()`
