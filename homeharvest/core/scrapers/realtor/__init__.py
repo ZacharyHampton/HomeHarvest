@@ -678,7 +678,11 @@ class RealtorScraper(Scraper):
         if self.open_house_from or self.open_house_to:
             min_date = self.open_house_from or "$today"
             if self.open_house_to:
-                return f'open_house: {{ min: "{min_date}", max: "{self.open_house_to}" }}'
+                #: the API's max is exclusive (midnight at the start of that day), so ask for the
+                #: day after: open_house_to="2026-11-29" keeps Sunday's open houses
+                from datetime import date, timedelta
+                max_date = (date.fromisoformat(self.open_house_to) + timedelta(days=1)).isoformat()
+                return f'open_house: {{ min: "{min_date}", max: "{max_date}" }}'
             return f'open_house: {{ min: "{min_date}" }}'
         if self.open_house:
             return 'open_house: { min: "$today" }'

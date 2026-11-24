@@ -490,9 +490,9 @@ def test_open_house_filter():
     assert make_scraper(open_house=True)._open_house_param() == 'open_house: { min: "$today" }'
     assert (
         make_scraper(open_house_from="2026-11-28", open_house_to="2026-11-29")._open_house_param()
-        == 'open_house: { min: "2026-11-28", max: "2026-11-29" }'
+        == 'open_house: { min: "2026-11-28", max: "2026-11-30" }'  #: the API's max is exclusive
     )
-    assert make_scraper(open_house_to="2026-11-29")._open_house_param() == 'open_house: { min: "$today", max: "2026-11-29" }'
+    assert make_scraper(open_house_to="2026-11-29")._open_house_param() == 'open_house: { min: "$today", max: "2026-11-30" }'
 
 
 # ---------------------------------------------------------------- parsing of new fields
@@ -724,7 +724,7 @@ def test_scrape_property_under_pyodide_uses_fetch_and_no_threads(pyodide):
     assert [home.property_id for home in results] == ["1", "2"]
     assert results[0].open_houses
     assert [r["operationName"] for r in pyodide.requests] == ["Search_suggestions", "Search_suggestions", "GetHomeSearch"]
-    assert 'open_house: { min: "2026-11-28", max: "2026-11-29" }' in pyodide.requests[-1]["query"]
+    assert 'open_house: { min: "2026-11-28", max: "2026-11-30" }' in pyodide.requests[-1]["query"]
 
 
 def test_proxies_are_refused_under_pyodide(pyodide):
