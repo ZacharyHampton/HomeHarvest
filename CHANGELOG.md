@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 (2026-11-23)
+
+README only: back to the original layout, so the PyPI page matches GitHub. No code changes.
+
 ## 2.0.0 (2026-11-23)
 
 A faster release that needs Python 3.11 or newer. 0.9.1 was never published; its changes are part of 2.0.0.
